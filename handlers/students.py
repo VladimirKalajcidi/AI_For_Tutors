@@ -3,10 +3,13 @@ from aiogram.filters import Text, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 from aiogram.dispatcher.event.handler import HandlerObject
-
+import json
+from aiogram.filters import StateFilter
 import database.crud as crud
 from keyboards.students import students_list_keyboard, student_actions_keyboard
 from states.student_states import StudentStates
+from keyboards.students import edit_student_keyboard  # в начало файла, если ещё не импортирован
+
 
 router = Router()
 
@@ -106,44 +109,38 @@ async def process_profile(message: Message, state: FSMContext, **data):
     await state.clear()
 
 
-
-
 @router.callback_query(Text(startswith="student:"))
-async def callback_view_student(callback: types.CallbackQuery, **kwargs):
-    teacher = kwargs.get("teacher")
+async def callback_view_student(callback: types.CallbackQuery, **data):
+    teacher = data.get("teacher")
+    print("➡️ Вызван handler student:", teacher)
     if not teacher:
         await callback.answer("⚠️ Ошибка авторизации", show_alert=True)
         return
 
     student_id = int(callback.data.split(":")[1])
-    profile = await crud.get_student_full_profile(teacher, student_id)
-    if not profile:
+    student = await crud.get_student(teacher, student_id)
+    if not student:
         await callback.answer("Student not found.", show_alert=True)
         return
 
-    student = profile["student"]
-
-    # Извлекаем level и goal из other_inf
+    # Распарсиваем other_inf (строка -> словарь)
     try:
         extra = json.loads(student.other_inf or "{}")
-        level = extra.get("level", "не указано")
-        goal = extra.get("goal", "не указано")
+        goal = extra.get("goal", "—")
+        level = extra.get("level", "—")
     except Exception:
-        level = goal = "не указано"
-
-    progress = profile["progress"] or "не указано"
-    next_topic = profile["next_topic"] or "не указана"
-    next_date = profile["next_date"] or "не указана"
+        goal = level = "—"
 
     text = (
-        f"👤 <b>{student.name} {student.surname}</b>\n"
-        f"🎯 Цель: <i>{goal}</i>\n"
-        f"🧠 Уровень: <i>{level}</i>\n"
-        f"📈 Прогресс: <i>{progress}</i>\n"
-        f"📘 Следующая тема: <i>{next_topic}</i>\n"
-        f"📅 Следующее занятие: <i>{next_date}</i>"
+        f"👤 {student.name} {student.surname or ''}\n"
+        f"🎯 Цель: {goal}\n"
+        f"📈 Уровень: {level}\n"
+        f"📚 Предмет: {student.subject or 'N/A'}\n"
+        f"📅 Следующее занятие: {student.link_schedule.date if student.link_schedule else '—'}\n"
+        f"📝 Тема: {student.report_student.next_lesson_topic if student.report_student else '—'}\n"
+        f"📊 Прогресс: {student.report_student.progress if student.report_student else '—'}"
     )
-    await callback.message.edit_text(text, reply_markup=student_actions_keyboard(student.students_id), parse_mode="HTML")
+    await callback.message.edit_text(text, reply_markup=student_actions_keyboard(student.students_id))
 
 
 
@@ -182,7 +179,7 @@ async def callback_generate_plan(callback: CallbackQuery, **data):
     except Exception:
         await callback.message.answer("📋 Study Plan:\n" + plan_text)
 
-    if teacher.yandex_token:
+    if hasattr(teacher, "yandex_token") and teacher.yandex_token:
         success = await storage_service.upload_file(pdf_path, teacher, file_name, folder="plans")
         await callback.message.answer("📁 Plan saved to Yandex Disk." if success else "⚠️ Failed to upload to Yandex Disk.")
 
@@ -205,18 +202,31 @@ async def callback_generate_assignment(callback: CallbackQuery, **data):
         return
 
     await callback.answer()
-    await callback.message.edit_text("✏️ Generating assignment, please wait...")
+    await callback.message.edit_text("✏️ Генерация задания, подождите...")
 
-    from services import gpt_service
-    questions, answers = await gpt_service.generate_assignment(student, language=teacher.language)
+    from services.gpt_service import generate_assignment
+    from services.storage_service import generate_text_pdf
 
-    await callback.message.answer(f"📑 *Assignment Questions:*\n{questions}\n\n*Answers:*\n{answers}", parse_mode="Markdown")
+    assignment_text = await generate_assignment(student, language=teacher.language)
+    file_name = f"Assignment_{student.name}_{student.surname}"
+    pdf_path = generate_text_pdf(assignment_text, file_name)
+
+    try:
+        await callback.message.answer_document(
+            document=types.FSInputFile(pdf_path),
+            caption=f"📝 Assignment for {student.name}"
+        )
+    except Exception:
+        await callback.message.answer(f"📑 Assignment:\n{assignment_text}")
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Subject: {student.subject or 'N/A'}\n"
         f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
+
+
 
 @router.callback_query(Text(startswith="upload:"))
 async def callback_upload_file(callback: CallbackQuery, state: FSMContext, **data):
@@ -250,3 +260,175 @@ async def process_file_upload(message: Message, state: FSMContext, **data):
     success = await storage_service.upload_bytes(buffer, teacher, file_name, folder=f"student_{student_id}")
     await message.answer(f"✅ File '{file_name}' uploaded to Yandex Disk." if success else "⚠️ Upload failed. Check your cloud token.")
     await state.clear()
+
+@router.callback_query(Text(startswith="genhomework:"))
+async def callback_generate_homework(callback: CallbackQuery, **data):
+    teacher = data.get("teacher")
+    student_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, student_id)
+    if not student:
+        await callback.answer("Student not found.", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.edit_text("📑 Генерация домашнего задания, подождите...")
+
+    from services.gpt_service import generate_homework
+    from services.storage_service import generate_text_pdf
+
+    text = await generate_homework(student, language=teacher.language)
+    file_name = f"Homework_{student.name}_{student.surname}"
+    pdf_path = generate_text_pdf(text, file_name)
+
+    try:
+        await callback.message.answer_document(
+            document=types.FSInputFile(pdf_path),
+            caption=f"📑 Домашнее задание для {student.name}"
+        )
+    except Exception:
+        await callback.message.answer(f"📄 Homework:\n{text}")
+
+    await callback.message.answer(
+        f"👤 {student.name} {student.surname or ''}\n"
+        f"📚 Subject: {student.subject or 'N/A'}\n"
+        f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
+        reply_markup=student_actions_keyboard(student.students_id)
+    )
+
+
+@router.callback_query(Text(startswith="genclasswork:"))
+async def callback_generate_classwork(callback: CallbackQuery, **data):
+    teacher = data.get("teacher")
+    student_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, student_id)
+    if not student:
+        await callback.answer("Student not found.", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.edit_text("🧪 Генерация контрольной работы, подождите...")
+
+    from services.gpt_service import generate_classwork
+    from services.storage_service import generate_text_pdf
+
+    text = await generate_classwork(student, language=teacher.language)
+    file_name = f"Classwork_{student.name}_{student.surname}"
+    pdf_path = generate_text_pdf(text, file_name)
+
+    try:
+        await callback.message.answer_document(
+            document=types.FSInputFile(pdf_path),
+            caption=f"🧪 Контрольная для {student.name}"
+        )
+    except Exception:
+        await callback.message.answer(f"📄 Classwork:\n{text}")
+
+    await callback.message.answer(
+        f"👤 {student.name} {student.surname or ''}\n"
+        f"📚 Subject: {student.subject or 'N/A'}\n"
+        f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
+        reply_markup=student_actions_keyboard(student.students_id)
+    )
+
+@router.callback_query(Text(startswith="genmaterials:"))
+async def callback_generate_materials(callback: CallbackQuery, **data):
+    teacher = data.get("teacher")
+    student_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, student_id)
+    if not student:
+        await callback.answer("Student not found.", show_alert=True)
+        return
+
+    await callback.answer()
+    await callback.message.edit_text("📚 Подбор обучающих материалов, подождите...")
+
+    from services.gpt_service import generate_learning_materials
+    from services.storage_service import generate_text_pdf
+
+    text = await generate_learning_materials(student, language=teacher.language)
+    file_name = f"Materials_{student.name}_{student.surname}"
+    pdf_path = generate_text_pdf(text, file_name)
+
+    try:
+        await callback.message.answer_document(
+            document=types.FSInputFile(pdf_path),
+            caption=f"📚 Обучающие материалы для {student.name}"
+        )
+    except Exception:
+        await callback.message.answer(f"📄 Learning Materials:\n{text}")
+
+    await callback.message.answer(
+        f"👤 {student.name} {student.surname or ''}\n"
+        f"📚 Subject: {student.subject or 'N/A'}\n"
+        f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
+        reply_markup=student_actions_keyboard(student.students_id)
+    )
+
+
+@router.callback_query(Text(startswith="edit_student:"))
+async def callback_edit_student(callback: CallbackQuery):
+    student_id = int(callback.data.split(":")[1])
+    await callback.answer()
+    await callback.message.edit_text(
+        "✏️ Выберите, что вы хотите изменить:",
+        reply_markup=edit_student_keyboard(student_id)
+    )
+
+@router.callback_query(Text(startswith="edit_field:"))
+async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
+    _, student_id, field = callback.data.split(":")
+    await state.set_state(StudentStates.editing_field)  # <-- добавлено
+    await state.update_data(student_id=int(student_id), field=field)
+    await callback.answer()
+    await callback.message.edit_text(f"✏️ Введите новое значение для поля: *{field}*", parse_mode="Markdown")
+
+
+@router.message(StateFilter(StudentStates.editing_field))
+async def process_student_field_edit(message: Message, state: FSMContext, **data):
+
+    state_data = await state.get_data()
+    student_id = state_data.get("student_id")
+    field = state_data.get("field")
+    teacher = data.get("teacher")
+
+    if not student_id or not field:
+        return  # не режим редактирования
+
+    new_value = message.text.strip()
+    await crud.update_student_field(teacher, student_id, field, new_value)
+    await state.clear()
+    await message.answer(f"✅ Поле *{field}* обновлено!", parse_mode="Markdown")
+
+    student = await crud.get_student(teacher, student_id)
+    await message.answer(
+        f"👤 {student.name} {student.surname or ''}\n"
+        f"📚 Subject: {student.subject or 'N/A'}\n"
+        f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
+        reply_markup=student_actions_keyboard(student_id)
+    )
+
+@router.callback_query(Text(startswith="delete_student:"))
+async def callback_delete_student(callback: CallbackQuery):
+    student_id = int(callback.data.split(":")[1])
+    await callback.answer()
+    await callback.message.edit_text(
+        "❗️Вы уверены, что хотите удалить ученика?",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
+            [types.InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete:{student_id}")],
+            [types.InlineKeyboardButton(text="❌ Отмена", callback_data=f"student:{student_id}")]
+        ])
+    )
+
+@router.callback_query(Text(startswith="confirm_delete:"))
+async def callback_confirm_delete(callback: CallbackQuery, **data):
+    teacher = data.get("teacher")
+    student_id = int(callback.data.split(":")[1])
+    await crud.delete_student(teacher, student_id)
+    await callback.answer("🗑 Ученик удалён")
+
+    students = await crud.list_students(teacher)
+    if students:
+        await callback.message.edit_text("📋 Список учеников обновлён:", reply_markup=students_list_keyboard(students))
+    else:
+        await callback.message.edit_text("У вас больше нет учеников.")
+

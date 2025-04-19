@@ -9,16 +9,30 @@ def get_client(token: str = None):
     client = yadisk.Client(token=token_to_use)
     return client
 
+from fpdf import FPDF
+import os
+
 def generate_plan_pdf(plan_text: str, student_name: str):
-    from fpdf import FPDF
     pdf = FPDF()
     pdf.add_page()
-    # Use a basic font (Helvetica supports Latin characters)
-    pdf.set_font("Helvetica", size=12)
-    pdf.multi_cell(0, 10, plan_text)
+
+    font_path = os.path.join("assets", "fonts", "DejaVuSans.ttf")
+    pdf.add_font("DejaVu", "", font_path, uni=True)
+    pdf.set_font("DejaVu", size=12)
+
+    lines = plan_text.split("\n")
+    for line in lines:
+        pdf.multi_cell(0, 10, line)
+
+    # 📁 Гарантируем, что папка существует
+    os.makedirs("storage", exist_ok=True)
+
     filename = f"plan_{student_name}.pdf"
-    pdf.output(filename)
-    return filename
+    filepath = os.path.join("storage", filename)
+    pdf.output(filepath)
+
+    return filepath
+
 
 async def upload_file(file_path: str, teacher, remote_filename: str, folder: str = ""):
     token = teacher.yandex_token or config.YANDEX_DISK_TOKEN
@@ -72,3 +86,19 @@ async def upload_bytes(file_obj: io.BytesIO, teacher, remote_filename: str, fold
         return True
     except Exception as e:
         return False
+
+
+def generate_text_pdf(text: str, filename: str, folder="storage"):
+    path = os.path.join(folder, f"{filename}.pdf")
+    os.makedirs(folder, exist_ok=True)
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.add_font("DejaVu", "", "assets/fonts/DejaVuSans.ttf", uni=True)
+    pdf.set_font("DejaVu", size=12)
+
+    for line in text.split("\n"):
+        pdf.multi_cell(0, 10, line)
+
+    pdf.output(path)
+    return path

@@ -9,3 +9,4 @@ class StudentStates(StatesGroup):
     enter_parent_phone = State()
     enter_profile = State()
     waiting_for_file = State()
+    editing_field = State() 

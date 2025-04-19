@@ -1,66 +1,92 @@
-from aiogram import Router, types
+from aiogram import Router
 from aiogram.filters import Text
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-import database.crud as crud
-from states.auth_state import AuthStates
+from aiogram.types import Message, CallbackQuery
+from aiogram.exceptions import TelegramBadRequest
+
 from keyboards.main_menu import get_main_menu
+from keyboards.teachers import (
+    teacher_profile_keyboard,
+    edit_teacher_field_keyboard,
+    settings_menu_keyboard
+)
+import database.crud as crud
+from states.auth_state import TeacherStates
 
 router = Router()
 
-@router.message(Text(text=["⚙️ Настройки", "⚙️ Settings"]))
-async def menu_settings(message: types.Message, teacher):
+# 📌 Открытие меню настроек
+@router.message(Text(text=["⚙️ Настройки"]))
+async def menu_settings(message: Message, **data):
+    await message.answer("⚙️ Настройки:", reply_markup=settings_menu_keyboard())
 
-    buttons = [
-        [InlineKeyboardButton(text="🔗 Яндекс.Диск", callback_data="link_yandex")],
-        [InlineKeyboardButton(text="✏️ Редактировать профиль", callback_data="edit_profile")],
-        [InlineKeyboardButton(text="🌐 Change Language", callback_data="set_lang")],
-        [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_menu")]
-    ]
 
-    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await message.answer("Settings:", reply_markup=kb)
-
+# 🌐 Смена языка
 @router.callback_query(Text("set_lang"))
-async def callback_set_lang(callback: types.CallbackQuery, teacher):
+async def callback_set_lang(callback: CallbackQuery, teacher):
     await callback.answer()
     new_lang = "en" if teacher.language == "ru" else "ru"
     teacher.language = new_lang
     await crud.update_teacher(teacher)
-    await callback.message.edit_text(f"Language changed to {'English' if new_lang=='en' else 'Russian'}.")
-    # Send updated main menu in new language
+    await callback.message.edit_text(f"Language changed to {'English' if new_lang == 'en' else 'Russian'}.")
     await callback.message.answer("Main menu:", reply_markup=get_main_menu(new_lang))
 
-@router.callback_query(Text("link_disk"))
-async def callback_link_disk(callback: types.CallbackQuery, state: FSMContext):
-    await callback.answer()
-    await state.set_state(AuthStates.register_password)  # reuse state for input
-    await state.update_data(linking="yandex")
-    await callback.message.edit_text("Please send your Yandex Disk OAuth token:")
 
-@router.message(AuthStates.register_password)
-async def process_link_token(message: types.Message, state: FSMContext, teacher):
-    data = await state.get_data()
-    if data.get("linking") == "yandex":
-        token = message.text.strip()
-        import yadisk
-        client = yadisk.Client(token=token)
-        try:
-            if client.check_token():
-                teacher.yandex_token = token
-                await crud.update_teacher(teacher)
-                await message.answer("✅ Yandex Disk linked successfully!")
-            else:
-                await message.answer("❌ Invalid token. Please try again:")
-                return
-        except Exception:
-            await message.answer("❌ Error verifying token. Please try again.")
-            return
-        await state.clear()
-
-@router.callback_query(Text("do_logout"))
-async def callback_do_logout(callback: types.CallbackQuery, teacher):
+# ✏️ Редактирование профиля — список полей
+@router.callback_query(Text("edit_profile"))
+async def callback_edit_profile(callback: CallbackQuery):
     await callback.answer()
-    teacher.is_logged_in = False
-    await crud.update_teacher(teacher)
-    await callback.message.edit_text("You have been logged out.")
+    try:
+        await callback.message.edit_text("✏️ Что вы хотите изменить?", reply_markup=edit_teacher_field_keyboard())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise
+
+
+# Выбор поля для редактирования
+@router.callback_query(Text(startswith="edit_teacher_field:"))
+async def callback_select_field(callback: CallbackQuery, state: FSMContext):
+    field = callback.data.split(":")[1]
+    await state.set_state(TeacherStates.editing_field)
+    await state.update_data(edit_field=field)
+    await callback.answer()
+    await callback.message.edit_text(f"✏️ Введите новое значение для: *{field}*", parse_mode="Markdown")
+
+
+# Обработка ввода нового значения
+@router.message(TeacherStates.editing_field)
+async def process_edit_field(message: Message, state: FSMContext, teacher):
+    state_data = await state.get_data()
+    field = state_data.get("edit_field")
+
+    if not field:
+        return
+
+    new_value = message.text.strip()
+    await crud.update_teacher_field(teacher, field, new_value)
+    await state.clear()
+
+    await message.answer(f"✅ Поле *{field}* успешно обновлено!", parse_mode="Markdown")
+
+    profile_text = (
+        f"👤 {teacher.surname or ''} {teacher.name or ''} {teacher.patronymic or ''}\n"
+        f"🗓️ Дата рождения: {teacher.birth_date or '—'}\n"
+        f"📞 Телефон: {teacher.phone or '—'}\n"
+        f"📧 Email: {teacher.email or '—'}\n"
+        f"📚 Предметы: {teacher.subjects or '—'}\n"
+        f"💼 Профессия: {teacher.occupation or '—'}\n"
+        f"🏢 Место работы: {teacher.workplace or '—'}"
+    )
+
+    await message.answer(profile_text, reply_markup=teacher_profile_keyboard())
+
+
+# 🔙 Кнопка "Назад" из редактирования в настройки
+@router.callback_query(Text("back_to_settings"))
+async def back_to_settings(callback: CallbackQuery):
+    await callback.answer()
+    try:
+        await callback.message.edit_text("⚙️ Настройки:", reply_markup=settings_menu_keyboard())
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise

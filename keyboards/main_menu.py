@@ -10,10 +10,10 @@ def get_main_menu(language: str = "ru"):
         ]
     else:
         buttons = [
-            [KeyboardButton(text="Students")],
+            [KeyboardButton(text="👨‍🎓 Students")],
+            [KeyboardButton(text="📅 Schedule")],
             [KeyboardButton(text="💳 Bill")],
-            [KeyboardButton(text="Schedule")],
-            [KeyboardButton(text="Settings")]
+            [KeyboardButton(text="⚙️ Settings")]
         ]
 
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)

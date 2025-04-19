@@ -42,9 +42,20 @@ async def update_teacher(teacher: models.Teacher):
         await session.commit()
         return teacher
 
+
+async def update_teacher_field(teacher, field: str, value: str):
+    async with db.AsyncSessionLocal() as session:
+        db_teacher = await session.get(models.Teacher, teacher.teacher_id)
+        if db_teacher:
+            setattr(db_teacher, field, value)
+            await session.commit()
+            setattr(teacher, field, value)  # обновим локально
+
+
 # ──────── STUDENT ────────
 
 # crud.py
+
 
 async def create_student(
     teacher,
@@ -77,6 +88,7 @@ async def list_students(teacher):
     async with db.AsyncSessionLocal() as session:
         result = await session.execute(select(models.Student).where(models.Student.teacher_id == teacher.teacher_id))
         return result.scalars().all()
+
 
 async def get_student_full_profile(teacher, student_id):
     async with db.AsyncSessionLocal() as session:
@@ -118,6 +130,21 @@ async def list_subjects_from_students(teacher: models.Teacher):
             .distinct()
         )
         return [row[0] for row in result.fetchall() if row[0]]
+
+async def update_student_field(teacher, student_id, field: str, value: str):
+    async with db.AsyncSessionLocal() as session:
+        student = await session.get(models.Student, student_id)
+        if student and student.teacher_id == teacher.teacher_id:
+            setattr(student, field, value)
+            await session.commit()
+
+async def delete_student(teacher, student_id):
+    async with db.AsyncSessionLocal() as session:
+        student = await session.get(models.Student, student_id)
+        if student and student.teacher_id == teacher.teacher_id:
+            await session.delete(student)
+            await session.commit()
+
 
 # ──────── LESSON ────────
 
@@ -170,3 +197,4 @@ async def set_lesson_notified(lesson_id: int):
             session.add(lesson)
             await session.commit()
         return lesson
+

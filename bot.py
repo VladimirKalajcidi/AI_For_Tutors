@@ -20,7 +20,8 @@ async def main():
     dp.include_router(settings.router)
     dp.include_router(payment.router)
     # Middlewares
-    dp.update.middleware(AuthMiddleware())
+    dp.message.middleware(AuthMiddleware())
+    dp.callback_query.middleware(AuthMiddleware())
     # Set bot commands (for menu hints)
     await bot.set_my_commands([
         BotCommand(command="start", description="Start the bot"),

@@ -19,3 +19,6 @@ class TeacherProfileStates(StatesGroup):
     subjects = State()
     occupation = State()
     workplace = State()
+
+class TeacherStates(StatesGroup):
+    editing_field = State()
