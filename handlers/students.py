@@ -8,7 +8,7 @@ from aiogram.filters import StateFilter
 import database.crud as crud
 from keyboards.students import students_list_keyboard, student_actions_keyboard
 from states.student_states import StudentStates
-from keyboards.students import edit_student_keyboard  # в начало файла, если ещё не импортирован
+from keyboards.students import edit_student_keyboard, yandex_materials_keyboard  # в начало файла, если ещё не импортирован
 
 
 router = Router()
@@ -432,3 +432,60 @@ async def callback_confirm_delete(callback: CallbackQuery, **data):
     else:
         await callback.message.edit_text("У вас больше нет учеников.")
 
+
+@router.callback_query(Text(startswith="yadisk:"))
+async def callback_yadisk_menu(callback: CallbackQuery):
+    student_id = int(callback.data.split(":")[1])
+    await callback.message.edit_text(
+        "📤 Выберите тип материала для загрузки:",
+        reply_markup=yandex_materials_keyboard(student_id)
+    )
+
+
+@router.callback_query(Text(startswith="upload_material:"))
+async def callback_select_material_type(callback: CallbackQuery, state: FSMContext):
+    _, student_id, material_type = callback.data.split(":")
+    await state.set_state(StudentStates.waiting_for_file)
+    await state.update_data(student_id=int(student_id), material_type=material_type)
+    await callback.message.edit_text("📎 Отправьте файл для загрузки на Яндекс.Диск.")
+
+
+@router.message(StudentStates.waiting_for_file)
+async def handle_file_upload(message: Message, state: FSMContext, teacher):
+    data = await state.get_data()
+    student_id = data.get("student_id")
+    material_type = data.get("material_type")
+    
+    if not teacher.yandex_token:
+        await message.answer("❌ Сначала подключите Яндекс.Диск в настройках.")
+        return
+    
+    if not message.document:
+        await message.answer("⚠️ Пришлите документ!")
+        return
+
+    from aiogram import Bot
+    import io
+
+    bot: Bot = message.bot  # получаем объект бота
+    file = await bot.get_file(message.document.file_id)
+    buffer = io.BytesIO()
+    await bot.download_file(file.file_path, destination=buffer)
+    buffer.seek(0)
+
+    from services.storage_service import upload_bytes
+    folder_map = {
+        "homework": "homeworks",
+        "assignment": "assignments",
+        "theory": "theory",
+        "plan": "plans"
+    }
+    folder = folder_map.get(material_type, "misc")
+
+    success = await upload_bytes(buffer, teacher, message.document.file_name, folder=f"student_{student_id}/{folder}")
+    await state.clear()
+
+    if success:
+        await message.answer(f"✅ Файл загружен в папку `{folder}` на Я.Диск.")
+    else:
+        await message.answer("❌ Ошибка загрузки.")

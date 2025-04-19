@@ -268,6 +268,35 @@ async def generate_classwork(student, topic: str = "", language="ru"):
 
     return await send_proxyapi_request(json_data)
 
+
+async def generate_learning_materials(student, topic: str = "", language="ru"):
+    subject_name = student.subject or "предмет"
+    try:
+        extra = json.loads(student.other_inf or "{}")
+        profile_info = extra.get("profile") or f"{extra.get('goal', '')}, уровень: {extra.get('level', '')}"
+    except Exception:
+        profile_info = student.other_inf or ""
+
+    if language == "ru":
+        prompt = f"Подбери обучающие материалы (статьи, видео, сайты, PDF) по теме {topic} по предмету {subject_name}."
+        if profile_info:
+            prompt += f" Уровень ученика: {profile_info}."
+        prompt += " Укажи ссылки, если возможно."
+    else:
+        prompt = f"Find study materials (articles, videos, websites, PDFs) for the topic {topic} in {subject_name}."
+        if profile_info:
+            prompt += f" Student level: {profile_info}."
+        prompt += " Include links if possible."
+
+    json_data = {
+        "model": MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_completion_tokens": 2500
+    }
+
+    return await send_proxyapi_request(json_data)
+
+
 async def send_proxyapi_request(json_data):
     try:
         start_time = time.time()

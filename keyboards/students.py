@@ -22,23 +22,9 @@ def students_list_keyboard(students):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def student_actions_keyboard(student_id: int):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="📝 Generate Plan", callback_data=f"genplan:{student_id}"),
-            InlineKeyboardButton(text="📄 Generate Assignment", callback_data=f"genassign:{student_id}")
-        ],
-        [
-            InlineKeyboardButton(text="📎 Upload File", callback_data=f"upload:{student_id}")
-        ],
-        [
-            InlineKeyboardButton(text="⬅️ Back", callback_data="back_students")
-        ]
-    ])
-
-
 def student_actions_keyboard(student_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📤 Яндекс.Диск", callback_data=f"yadisk:{student_id}")],
         [InlineKeyboardButton(text="📋 План", callback_data=f"genplan:{student_id}")],
         [InlineKeyboardButton(text="📝 Задание", callback_data=f"genassign:{student_id}")],
         [InlineKeyboardButton(text="📑 Домашка", callback_data=f"genhomework:{student_id}")],
@@ -52,6 +38,14 @@ def student_actions_keyboard(student_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_students")]
     ])
 
+def yandex_materials_keyboard(student_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📄 Домашка", callback_data=f"upload_material:{student_id}:homework")],
+        [InlineKeyboardButton(text="📝 Задание", callback_data=f"upload_material:{student_id}:assignment")],
+        [InlineKeyboardButton(text="📚 Теория", callback_data=f"upload_material:{student_id}:theory")],
+        [InlineKeyboardButton(text="📋 Учебный план", callback_data=f"upload_material:{student_id}:plan")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data=f"student:{student_id}")]
+    ])
 
 def edit_student_keyboard(student_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -64,3 +58,5 @@ def edit_student_keyboard(student_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Доп. инфо", callback_data=f"edit_field:{student_id}:other_inf")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data=f"student:{student_id}")]
     ])
+
+
