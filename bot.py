@@ -3,7 +3,7 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 import config
-from handlers import auth, subjects, students, schedule, settings, payment
+from handlers import auth, subjects, students, schedule, settings, payment, schedule_edit, google_auth
 from middlewares.auth_middleware import AuthMiddleware
 from services import notification_service
 
@@ -19,6 +19,9 @@ async def main():
     dp.include_router(schedule.router)
     dp.include_router(settings.router)
     dp.include_router(payment.router)
+    dp.include_router(schedule_edit.router)
+    dp.include_router(google_auth.router)
+
     # Middlewares
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())

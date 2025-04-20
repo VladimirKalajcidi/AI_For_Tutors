@@ -3,6 +3,8 @@ from aiogram.filters import Text
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
+from keyboards.main_menu import main_menu_kb
+from database.db import async_session
 
 from keyboards.main_menu import get_main_menu
 from keyboards.teachers import (
@@ -12,7 +14,7 @@ from keyboards.teachers import (
 )
 import database.crud as crud
 from states.auth_state import TeacherStates
-from database.db import AsyncSessionLocal
+from database.db import async_session
 from sqlalchemy import select
 # Сохраняем токен в БД
 from sqlalchemy.orm import selectinload
@@ -115,7 +117,7 @@ async def save_yandex_token(message: Message, state: FSMContext, **data):
     teacher = data.get("teacher")
     token = message.text.strip()
 
-    async with AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(select(Teacher).where(Teacher.telegram_id == teacher.telegram_id))
         db_teacher = result.scalar_one_or_none()
 
@@ -127,3 +129,35 @@ async def save_yandex_token(message: Message, state: FSMContext, **data):
             await message.answer("⚠️ Ошибка сохранения токена.")
 
     await state.clear()
+
+
+from aiogram.types import Message, CallbackQuery
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.fsm.context import FSMContext
+
+@router.message(F.text == "⚙️ Настройки")
+async def open_settings(message: Message):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔗 Подключить Google Calendar", callback_data="google_auth")
+    kb.button(text="↩ Главное меню", callback_data="back_to_menu")
+    await message.answer("Настройки:", reply_markup=kb.as_markup())
+
+@router.callback_query(F.data == "google_auth")
+async def ask_for_google_auth(callback: CallbackQuery, state: FSMContext):
+    from handlers.google_auth import start_google_auth
+    await start_google_auth(callback.message, state)
+
+
+@router.callback_query(F.data == "back_to_menu")
+async def back_to_menu(callback: CallbackQuery):
+    from keyboards.main_menu import main_menu_kb
+    from database import crud
+
+    teacher = await crud.get_teacher_by_telegram_id(callback.from_user.id)
+    lang = teacher.language if teacher else "ru"
+
+    await callback.message.answer(
+        "Главное меню. Выберите раздел:",
+        reply_markup=main_menu_kb(lang)
+    )
+

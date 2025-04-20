@@ -24,6 +24,9 @@ class Teacher(Base):
     link_schedule = Column(String)
     is_logged_in = Column(Boolean, default=True)
     yandex_token = Column(String, nullable=True)  # токен Яндекс.Диска
+    google_access_token = Column(String, nullable=True)
+    google_refresh_token = Column(String, nullable=True)
+
 
     
 
@@ -64,6 +67,8 @@ class Lesson(Base):
     link_test = Column(String)
     link_test_verified = Column(String)
     link_plan = Column(String)
+    google_event_id = Column(String, nullable=True)
+
 
     teacher = relationship("Teacher", back_populates="lessons")
     student = relationship("Student", back_populates="lessons")

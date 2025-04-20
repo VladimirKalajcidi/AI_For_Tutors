@@ -1,27 +1,31 @@
 from datetime import datetime
 from sqlalchemy import select
 from . import db, models
+from database.models import Teacher
+from database.db import async_session
+
 
 # ──────── TEACHER ────────
 
+
 async def get_teacher_by_login(login: str):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(select(models.Teacher).filter_by(login=login))
         return result.scalars().first()
 
 async def get_teacher_by_telegram_id(telegram_id: int):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(select(models.Teacher).filter_by(telegram_id=telegram_id))
         return result.scalars().first()
 
 
 async def get_teacher_by_id(teacher_id: int):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(select(models.Teacher).filter_by(teacher_id=teacher_id))
         return result.scalars().first()
 
 async def create_teacher(login: str, password_hash: str, telegram_id: int, name: str = "", language: str = "ru"):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         teacher = models.Teacher(
             login=login,
             password_hash=password_hash,
@@ -37,19 +41,26 @@ async def create_teacher(login: str, password_hash: str, telegram_id: int, name:
         return teacher
 
 async def update_teacher(teacher: models.Teacher):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         await session.merge(teacher)
         await session.commit()
         return teacher
 
 
 async def update_teacher_field(teacher, field: str, value: str):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         db_teacher = await session.get(models.Teacher, teacher.teacher_id)
         if db_teacher:
             setattr(db_teacher, field, value)
             await session.commit()
             setattr(teacher, field, value)  # обновим локально
+            
+
+async def update_teacher(teacher: Teacher):
+    async with async_session() as session:
+        session.add(teacher)
+        await session.commit()
+
 
 
 # ──────── STUDENT ────────
@@ -67,7 +78,7 @@ async def create_student(
     parent_phone: str,
     other_inf: str = ""
 ):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         student = models.Student(
             name=name,
             surname=surname,
@@ -85,13 +96,13 @@ async def create_student(
 
 
 async def list_students(teacher):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(select(models.Student).where(models.Student.teacher_id == teacher.teacher_id))
         return result.scalars().all()
 
 
 async def get_student_full_profile(teacher, student_id):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         student = await session.get(models.Student, student_id)
         if not student or student.teacher_id != teacher.teacher_id:
             return None
@@ -112,7 +123,7 @@ async def get_student_full_profile(teacher, student_id):
 
 
 async def get_student(teacher, student_id):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(
             select(models.Student).where(
                 models.Student.teacher_id == teacher.teacher_id,
@@ -123,7 +134,7 @@ async def get_student(teacher, student_id):
 
 
 async def list_subjects_from_students(teacher: models.Teacher):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(
             select(models.Student.subject)
             .where(models.Student.teacher_id == teacher.teacher_id)
@@ -132,14 +143,14 @@ async def list_subjects_from_students(teacher: models.Teacher):
         return [row[0] for row in result.fetchall() if row[0]]
 
 async def update_student_field(teacher, student_id, field: str, value: str):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         student = await session.get(models.Student, student_id)
         if student and student.teacher_id == teacher.teacher_id:
             setattr(student, field, value)
             await session.commit()
 
 async def delete_student(teacher, student_id):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         student = await session.get(models.Student, student_id)
         if student and student.teacher_id == teacher.teacher_id:
             await session.delete(student)
@@ -149,7 +160,7 @@ async def delete_student(teacher, student_id):
 # ──────── LESSON ────────
 
 async def create_lesson(teacher: models.Teacher, student: models.Student, subject: str, time: datetime, title: str = ""):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         lesson = models.Lesson(
             teacher_id=teacher.teacher_id,
             students_id=student.students_id,
@@ -168,7 +179,7 @@ async def create_lesson(teacher: models.Teacher, student: models.Student, subjec
         return lesson
 
 async def list_upcoming_lessons(teacher: models.Teacher, from_time: datetime = None):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         if from_time is None:
             from_time = datetime.now()
         result = await session.execute(
@@ -180,7 +191,7 @@ async def list_upcoming_lessons(teacher: models.Teacher, from_time: datetime = N
         return result.scalars().all()
 
 async def get_lessons_for_notification(until_time: datetime):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(
             select(models.Lesson)
             .where(models.Lesson.data_of_lesson <= until_time.strftime("%Y-%m-%d %H:%M"))
@@ -189,7 +200,7 @@ async def get_lessons_for_notification(until_time: datetime):
         return result.scalars().all()
 
 async def set_lesson_notified(lesson_id: int):
-    async with db.AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(select(models.Lesson).filter_by(lesson_id=lesson_id))
         lesson = result.scalars().first()
         if lesson:

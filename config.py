@@ -17,6 +17,11 @@ PROXYAPI_KEY = os.getenv("PROXYAPI_KEY", "sk-0rh9j7yU0H94x7jFJKzeLNMV2Ld1wZKx")
 # Yandex Disk OAuth token (if using a single account for storage; otherwise each teacher will have their own token)
 YANDEX_DISK_TOKEN = os.getenv("YANDEX_DISK_TOKEN", "")
 
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+GOOGLE_CLIENT_ID = "your-client-id"
+GOOGLE_CLIENT_SECRET = "your-client-secret"
+
+
 # YooKassa API credentials for subscription payments
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "")
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "")

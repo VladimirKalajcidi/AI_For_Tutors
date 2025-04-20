@@ -17,3 +17,18 @@ def get_main_menu(language: str = "ru"):
         ]
 
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
+
+
+def main_menu_kb(locale: str = "ru") -> ReplyKeyboardMarkup:
+    if locale == "ru":
+        buttons = [
+            [KeyboardButton("📚 Предметы"), KeyboardButton("📅 Расписание")],
+            [KeyboardButton("⚙️ Настройки"), KeyboardButton("💳 Оплата")]
+        ]
+    else:
+        buttons = [
+            [KeyboardButton("📚 Subjects"), KeyboardButton("📅 Schedule")],
+            [KeyboardButton("⚙️ Settings"), KeyboardButton("💳 Payment")]
+        ]
+
+    return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)

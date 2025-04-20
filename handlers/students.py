@@ -13,7 +13,7 @@ from io import BytesIO
 from services import storage_service
 from services.storage_service import upload_bytes_to_yandex
 from aiogram import Bot
-from database.db import AsyncSessionLocal
+from database.db import async_session
 from database.models import Student
 from sqlalchemy import select
 
@@ -269,7 +269,7 @@ async def process_file_upload(message: Message, state: FSMContext, bot: Bot, **d
     buffer.seek(0)
 
     # Получаем объект студента из БД
-    async with AsyncSessionLocal() as session:
+    async with async_session() as session:
         result = await session.execute(select(Student).where(Student.students_id == students_id))
         student = result.scalar_one_or_none()
 
