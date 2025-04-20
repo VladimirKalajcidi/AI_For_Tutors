@@ -31,7 +31,7 @@ async def start_google_auth(message: Message, state: FSMContext):
     auth_url, _ = flow.authorization_url(prompt="consent")
 
     await state.set_state(GoogleAuthState.waiting_for_code)
-    await state.update_data(flow_json=flow.to_json())
+    await state.update_data(flow_client_config=flow.client_config)
 
     await message.answer(f"Перейдите по ссылке, авторизуйтесь и вставьте код сюда:\n{auth_url}")
 
