@@ -9,7 +9,13 @@ import database.crud as crud
 from keyboards.students import students_list_keyboard, student_actions_keyboard
 from states.student_states import StudentStates
 from keyboards.students import edit_student_keyboard, yandex_materials_keyboard  # в начало файла, если ещё не импортирован
-
+from io import BytesIO
+from services import storage_service
+from services.storage_service import upload_bytes_to_yandex
+from aiogram import Bot
+from database.db import AsyncSessionLocal
+from database.models import Student
+from sqlalchemy import select
 
 router = Router()
 
@@ -117,8 +123,8 @@ async def callback_view_student(callback: types.CallbackQuery, **data):
         await callback.answer("⚠️ Ошибка авторизации", show_alert=True)
         return
 
-    student_id = int(callback.data.split(":")[1])
-    student = await crud.get_student(teacher, student_id)
+    students_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, students_id)
     if not student:
         await callback.answer("Student not found.", show_alert=True)
         return
@@ -157,8 +163,8 @@ async def back_to_students(callback: CallbackQuery, **data):
 @router.callback_query(Text(startswith="genplan:"))
 async def callback_generate_plan(callback: CallbackQuery, **data):
     teacher = data.get("teacher")
-    student_id = int(callback.data.split(":")[1])
-    student = await crud.get_student(teacher, student_id)
+    students_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, students_id)
     if not student:
         await callback.answer("Student not found.", show_alert=True)
         return
@@ -191,12 +197,11 @@ async def callback_generate_plan(callback: CallbackQuery, **data):
     )
 
 
-
 @router.callback_query(Text(startswith="genassign:"))
 async def callback_generate_assignment(callback: CallbackQuery, **data):
     teacher = data.get("teacher")
-    student_id = int(callback.data.split(":")[1])
-    student = await crud.get_student(teacher, student_id)
+    students_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, students_id)
     if not student:
         await callback.answer("Student not found.", show_alert=True)
         return
@@ -228,10 +233,11 @@ async def callback_generate_assignment(callback: CallbackQuery, **data):
 
 
 
+
 @router.callback_query(Text(startswith="upload:"))
 async def callback_upload_file(callback: CallbackQuery, state: FSMContext, **data):
     teacher = data.get("teacher")
-    student_id = int(callback.data.split(":")[1])
+    students_id = int(callback.data.split(":")[1])
     if not teacher.yandex_token:
         await callback.answer()
         await callback.message.answer("⚠️ Yandex Disk is not linked. Link it in Settings.")
@@ -239,33 +245,62 @@ async def callback_upload_file(callback: CallbackQuery, state: FSMContext, **dat
 
     await callback.answer()
     await state.set_state(StudentStates.waiting_for_file)
-    await state.update_data(student_id=student_id)
+    await state.update_data(students_id=students_id)
     await callback.message.edit_text("📎 Send the file (document) to upload for this student.")
 
+
+
 @router.message(StudentStates.waiting_for_file)
-async def process_file_upload(message: Message, state: FSMContext, **data):
+async def process_file_upload(message: Message, state: FSMContext, bot: Bot, **data):
     teacher = data.get("teacher")
+    
     if not message.document:
         await message.answer("⚠️ Please upload a valid document file.")
         return
 
-    student_id = (await state.get_data()).get("student_id")
+    state_data = await state.get_data()
+    students_id = state_data.get("students_id")
     file_name = message.document.file_name or "file"
-    import io
-    buffer = io.BytesIO()
-    await message.document.download(destination_file=buffer)
+
+    # Получаем файл в память
+    file = await bot.get_file(message.document.file_id)
+    buffer = BytesIO()
+    await bot.download_file(file.file_path, buffer)
     buffer.seek(0)
 
-    from services import storage_service
-    success = await storage_service.upload_bytes(buffer, teacher, file_name, folder=f"student_{student_id}")
-    await message.answer(f"✅ File '{file_name}' uploaded to Yandex Disk." if success else "⚠️ Upload failed. Check your cloud token.")
+    # Получаем объект студента из БД
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Student).where(Student.students_id == students_id))
+        student = result.scalar_one_or_none()
+
+    if not student:
+        await message.answer("❌ Ученик не найден.")
+        await state.clear()
+        return
+
+    # Загружаем файл на Яндекс.Диск
+    success = await upload_bytes_to_yandex(
+        file_obj=buffer,
+        teacher=teacher,
+        student=student,
+        category="Материалы",  # или другая категория
+        filename_base=file_name.rsplit(".", 1)[0]
+    )
+
+    if success:
+        await message.answer(f"✅ Файл '{file_name}' успешно загружен в Яндекс.Диск (категория: Материалы).")
+    else:
+        await message.answer("❌ Ошибка при загрузке файла на Я.Диск. Проверьте токен в настройках.")
+
     await state.clear()
+
+
 
 @router.callback_query(Text(startswith="genhomework:"))
 async def callback_generate_homework(callback: CallbackQuery, **data):
     teacher = data.get("teacher")
-    student_id = int(callback.data.split(":")[1])
-    student = await crud.get_student(teacher, student_id)
+    students_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, students_id)
     if not student:
         await callback.answer("Student not found.", show_alert=True)
         return
@@ -299,8 +334,8 @@ async def callback_generate_homework(callback: CallbackQuery, **data):
 @router.callback_query(Text(startswith="genclasswork:"))
 async def callback_generate_classwork(callback: CallbackQuery, **data):
     teacher = data.get("teacher")
-    student_id = int(callback.data.split(":")[1])
-    student = await crud.get_student(teacher, student_id)
+    students_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, students_id)
     if not student:
         await callback.answer("Student not found.", show_alert=True)
         return
@@ -333,8 +368,8 @@ async def callback_generate_classwork(callback: CallbackQuery, **data):
 @router.callback_query(Text(startswith="genmaterials:"))
 async def callback_generate_materials(callback: CallbackQuery, **data):
     teacher = data.get("teacher")
-    student_id = int(callback.data.split(":")[1])
-    student = await crud.get_student(teacher, student_id)
+    students_id = int(callback.data.split(":")[1])
+    student = await crud.get_student(teacher, students_id)
     if not student:
         await callback.answer("Student not found.", show_alert=True)
         return
@@ -367,18 +402,18 @@ async def callback_generate_materials(callback: CallbackQuery, **data):
 
 @router.callback_query(Text(startswith="edit_student:"))
 async def callback_edit_student(callback: CallbackQuery):
-    student_id = int(callback.data.split(":")[1])
+    students_id = int(callback.data.split(":")[1])
     await callback.answer()
     await callback.message.edit_text(
         "✏️ Выберите, что вы хотите изменить:",
-        reply_markup=edit_student_keyboard(student_id)
+        reply_markup=edit_student_keyboard(students_id)
     )
 
 @router.callback_query(Text(startswith="edit_field:"))
 async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
-    _, student_id, field = callback.data.split(":")
+    _, students_id, field = callback.data.split(":")
     await state.set_state(StudentStates.editing_field)  # <-- добавлено
-    await state.update_data(student_id=int(student_id), field=field)
+    await state.update_data(students_id=int(students_id), field=field)
     await callback.answer()
     await callback.message.edit_text(f"✏️ Введите новое значение для поля: *{field}*", parse_mode="Markdown")
 
@@ -387,43 +422,43 @@ async def callback_edit_field(callback: CallbackQuery, state: FSMContext):
 async def process_student_field_edit(message: Message, state: FSMContext, **data):
 
     state_data = await state.get_data()
-    student_id = state_data.get("student_id")
+    students_id = state_data.get("students_id")
     field = state_data.get("field")
     teacher = data.get("teacher")
 
-    if not student_id or not field:
+    if not students_id or not field:
         return  # не режим редактирования
 
     new_value = message.text.strip()
-    await crud.update_student_field(teacher, student_id, field, new_value)
+    await crud.update_student_field(teacher, students_id, field, new_value)
     await state.clear()
     await message.answer(f"✅ Поле *{field}* обновлено!", parse_mode="Markdown")
 
-    student = await crud.get_student(teacher, student_id)
+    student = await crud.get_student(teacher, students_id)
     await message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Subject: {student.subject or 'N/A'}\n"
         f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
-        reply_markup=student_actions_keyboard(student_id)
+        reply_markup=student_actions_keyboard(students_id)
     )
 
 @router.callback_query(Text(startswith="delete_student:"))
 async def callback_delete_student(callback: CallbackQuery):
-    student_id = int(callback.data.split(":")[1])
+    students_id = int(callback.data.split(":")[1])
     await callback.answer()
     await callback.message.edit_text(
         "❗️Вы уверены, что хотите удалить ученика?",
         reply_markup=types.InlineKeyboardMarkup(inline_keyboard=[
-            [types.InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete:{student_id}")],
-            [types.InlineKeyboardButton(text="❌ Отмена", callback_data=f"student:{student_id}")]
+            [types.InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"confirm_delete:{students_id}")],
+            [types.InlineKeyboardButton(text="❌ Отмена", callback_data=f"student:{students_id}")]
         ])
     )
 
 @router.callback_query(Text(startswith="confirm_delete:"))
 async def callback_confirm_delete(callback: CallbackQuery, **data):
     teacher = data.get("teacher")
-    student_id = int(callback.data.split(":")[1])
-    await crud.delete_student(teacher, student_id)
+    students_id = int(callback.data.split(":")[1])
+    await crud.delete_student(teacher, students_id)
     await callback.answer("🗑 Ученик удалён")
 
     students = await crud.list_students(teacher)
@@ -435,25 +470,24 @@ async def callback_confirm_delete(callback: CallbackQuery, **data):
 
 @router.callback_query(Text(startswith="yadisk:"))
 async def callback_yadisk_menu(callback: CallbackQuery):
-    student_id = int(callback.data.split(":")[1])
+    students_id = int(callback.data.split(":")[1])
     await callback.message.edit_text(
         "📤 Выберите тип материала для загрузки:",
-        reply_markup=yandex_materials_keyboard(student_id)
+        reply_markup=yandex_materials_keyboard(students_id)
     )
 
 
 @router.callback_query(Text(startswith="upload_material:"))
 async def callback_select_material_type(callback: CallbackQuery, state: FSMContext):
-    _, student_id, material_type = callback.data.split(":")
+    _, students_id, material_type = callback.data.split(":")
     await state.set_state(StudentStates.waiting_for_file)
-    await state.update_data(student_id=int(student_id), material_type=material_type)
+    await state.update_data(students_id=int(students_id), material_type=material_type)
     await callback.message.edit_text("📎 Отправьте файл для загрузки на Яндекс.Диск.")
-
 
 @router.message(StudentStates.waiting_for_file)
 async def handle_file_upload(message: Message, state: FSMContext, teacher):
     data = await state.get_data()
-    student_id = data.get("student_id")
+    students_id = data.get("students_id")
     material_type = data.get("material_type")
     
     if not teacher.yandex_token:
@@ -466,26 +500,51 @@ async def handle_file_upload(message: Message, state: FSMContext, teacher):
 
     from aiogram import Bot
     import io
+    from database.db import AsyncSessionLocal
+    from database.models import Student
+    from sqlalchemy import select
+    from services.storage_service import upload_bytes_to_yandex
 
-    bot: Bot = message.bot  # получаем объект бота
+    # Получаем файл
+    bot: Bot = message.bot
     file = await bot.get_file(message.document.file_id)
     buffer = io.BytesIO()
     await bot.download_file(file.file_path, destination=buffer)
     buffer.seek(0)
 
-    from services.storage_service import upload_bytes
-    folder_map = {
-        "homework": "homeworks",
-        "assignment": "assignments",
-        "theory": "theory",
-        "plan": "plans"
-    }
-    folder = folder_map.get(material_type, "misc")
+    # Получаем объект ученика
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Student).where(Student.students_id == students_id))
+        student = result.scalar_one_or_none()
 
-    success = await upload_bytes(buffer, teacher, message.document.file_name, folder=f"student_{student_id}/{folder}")
+    if not student:
+        await message.answer("❌ Ученик не найден.")
+        return
+
+    # Названия папок по типу материала
+    folder_map = {
+        "homework": "Домашние работы",
+        "assignment": "Классные работы",
+        "theory": "Теория",
+        "plan": "Планы",
+        "report": "Отчёты",
+        "checked": "Проверено"
+    }
+    category = folder_map.get(material_type, "Материалы")
+
+    # Загружаем файл
+    filename_base = message.document.file_name.rsplit(".", 1)[0]
+    success = await upload_bytes_to_yandex(
+        file_obj=buffer,
+        teacher=teacher,
+        student=student,
+        category=category,
+        filename_base=filename_base
+    )
+
     await state.clear()
 
     if success:
-        await message.answer(f"✅ Файл загружен в папку `{folder}` на Я.Диск.")
+        await message.answer(f"✅ Файл загружен в папку `{category}` на Яндекс.Диске.")
     else:
-        await message.answer("❌ Ошибка загрузки.")
+        await message.answer("❌ Ошибка загрузки файла.")

@@ -12,6 +12,14 @@ from keyboards.teachers import (
 )
 import database.crud as crud
 from states.auth_state import TeacherStates
+from database.db import AsyncSessionLocal
+from sqlalchemy import select
+# Сохраняем токен в БД
+from sqlalchemy.orm import selectinload
+from database.models import Teacher
+
+from aiogram import F
+from aiogram.fsm.state import State, StatesGroup
 
 router = Router()
 
@@ -90,3 +98,32 @@ async def back_to_settings(callback: CallbackQuery):
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
             raise
+
+
+class YandexDiskStates(StatesGroup):
+    waiting_for_token = State()
+
+
+@router.callback_query(F.data == "link_yandex_disk")
+async def start_yandex_token_input(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("🔐 Введите ваш API токен Яндекс.Диска:")
+    await state.set_state(YandexDiskStates.waiting_for_token)
+
+
+@router.message(YandexDiskStates.waiting_for_token)
+async def save_yandex_token(message: Message, state: FSMContext, **data):
+    teacher = data.get("teacher")
+    token = message.text.strip()
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Teacher).where(Teacher.telegram_id == teacher.telegram_id))
+        db_teacher = result.scalar_one_or_none()
+
+        if db_teacher:
+            db_teacher.yandex_token = token
+            await session.commit()
+            await message.answer("✅ Токен Яндекс.Диска сохранён!")
+        else:
+            await message.answer("⚠️ Ошибка сохранения токена.")
+
+    await state.clear()

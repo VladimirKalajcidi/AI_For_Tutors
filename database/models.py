@@ -23,6 +23,8 @@ class Teacher(Base):
     subscription_expires = Column(String)  # Можно привести к Date, если планируешь сравнения
     link_schedule = Column(String)
     is_logged_in = Column(Boolean, default=True)
+    yandex_token = Column(String, nullable=True)  # токен Яндекс.Диска
+
     
 
     students = relationship("Student", back_populates="teacher", cascade="all, delete-orphan")

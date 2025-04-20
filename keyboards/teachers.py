@@ -22,5 +22,6 @@ def edit_teacher_field_keyboard() -> InlineKeyboardMarkup:
 def settings_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Редактировать профиль", callback_data="edit_profile")],
+        [InlineKeyboardButton(text="🔗 Подключить Яндекс.Диск", callback_data="link_yandex_disk")],
         [InlineKeyboardButton(text="🌐 Change Language", callback_data="set_lang")]
     ])
