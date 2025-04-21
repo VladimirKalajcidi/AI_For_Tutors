@@ -17,23 +17,32 @@ class GoogleAuthState(StatesGroup):
 
 @router.message(F.text.lower() == "подключить google")
 async def start_google_auth(message: Message, state: FSMContext):
+    config_data = {
+        "installed": {
+            "client_id": config.GOOGLE_CLIENT_ID,
+            "client_secret": config.GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token"
+        }
+    }
+
     flow = InstalledAppFlow.from_client_config(
-        {
-            "installed": {
-                "client_id": config.GOOGLE_CLIENT_ID,
-                "client_secret": config.GOOGLE_CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token"
-            }
-        },
+        config_data,
         scopes=SCOPES
     )
-    auth_url, _ = flow.authorization_url(prompt="consent")
+
+    auth_url, _ = flow.authorization_url(
+        prompt="consent",
+        access_type="offline",
+        include_granted_scopes="true",
+        redirect_uri="urn:ietf:wg:oauth:2.0:oob"
+    )
 
     await state.set_state(GoogleAuthState.waiting_for_code)
-    await state.update_data(flow_client_config=flow.client_config)
+    await state.update_data(flow_client_config=config_data)
 
     await message.answer(f"Перейдите по ссылке, авторизуйтесь и вставьте код сюда:\n{auth_url}")
+
 
 @router.message(GoogleAuthState.waiting_for_code)
 async def finish_google_auth(message: Message, state: FSMContext):
