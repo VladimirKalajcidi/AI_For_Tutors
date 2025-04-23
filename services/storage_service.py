@@ -10,6 +10,25 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+import os
+
+STORAGE_PATH = "/mnt/data/ai_for_tutors_project/AI_For_Tutors/storage/"
+
+async def list_student_materials_by_name(student_name: str) -> list[str]:
+    """
+    Возвращает список файлов из локального хранилища, содержащих имя ученика.
+    Используется для формирования контекста GPT.
+    """
+    try:
+        return [
+            f for f in os.listdir(STORAGE_PATH)
+            if student_name.lower() in f.lower()
+        ]
+    except FileNotFoundError:
+        return []
+
+
+
 def get_client(token: str = None):
     token_to_use = token or config.YANDEX_DISK_TOKEN
     if not token_to_use:

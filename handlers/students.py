@@ -89,14 +89,33 @@ async def process_parent_phone(message: Message, state: FSMContext):
 
 
 @router.message(StudentStates.enter_profile)
-async def process_profile(message: Message, state: FSMContext, **data):
+async def process_profile(message: Message, state: FSMContext):
+    profile_text = message.text.strip()
+    await state.update_data(profile=profile_text)
+    await message.answer("🎯 Введите цель обучения:")
+    await state.set_state(StudentStates.enter_goal)
+
+@router.message(StudentStates.enter_goal)
+async def process_goal(message: Message, state: FSMContext):
+    await state.update_data(goal=message.text.strip())
+    await message.answer("📈 Введите уровень знаний ученика:")
+    await state.set_state(StudentStates.enter_level)
+
+
+@router.message(StudentStates.enter_level)
+async def process_level(message: Message, state: FSMContext, **data):
+    import json
     teacher = data.get("teacher")
-    profile = message.text.strip()
-    if profile == "-":
-        profile = ""
-    await state.update_data(other_inf=profile)
+    level = message.text.strip()
 
     student_data = await state.get_data()
+
+    # Собираем structured JSON для other_inf
+    other_inf = {
+        "profile": student_data.get("profile"),
+        "goal": student_data.get("goal"),
+        "level": level,
+    }
 
     new_student = await crud.create_student(
         teacher=teacher,
@@ -106,13 +125,14 @@ async def process_profile(message: Message, state: FSMContext, **data):
         subject=student_data.get("subject"),
         phone=student_data.get("phone"),
         parent_phone=student_data.get("parent_phone"),
-        other_inf=student_data.get("other_inf"),
+        other_inf=json.dumps(other_inf),
     )
 
-    await message.answer(f"✅ Student '{new_student.name} {new_student.surname}' added.")
+    await message.answer(f"✅ Ученик '{new_student.name} {new_student.surname}' добавлен.")
     students = await crud.list_students(teacher)
-    await message.answer("Updated student list:", reply_markup=students_list_keyboard(students))
+    await message.answer("📋 Обновлённый список учеников:", reply_markup=students_list_keyboard(students))
     await state.clear()
+
 
 
 @router.callback_query(Text(startswith="student:"))
@@ -174,7 +194,7 @@ async def callback_generate_plan(callback: CallbackQuery, **data):
     await callback.message.edit_text("✏️ Generating study plan, please wait...")
 
     from services import gpt_service, storage_service
-    plan_text = await gpt_service.generate_study_plan(student, language=teacher.language)
+    plan_text = await gpt_service.generate_study_plan(student, language=teacher.language or "ru")
     pdf_path = storage_service.generate_plan_pdf(plan_text, student.name)
 
     try:
@@ -221,7 +241,7 @@ async def callback_generate_assignment(callback: CallbackQuery, **data):
     from services.gpt_service import generate_assignment
     from services.storage_service import generate_text_pdf
 
-    assignment_text = await generate_assignment(student, language=teacher.language)
+    assignment_text = await generate_assignment(student, language=teacher.language or "ru")
     file_name = f"Assignment_{student.name}_{student.surname}"
     pdf_path = generate_text_pdf(assignment_text, file_name)
 
