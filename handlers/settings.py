@@ -108,7 +108,21 @@ class YandexDiskStates(StatesGroup):
 
 @router.callback_query(F.data == "link_yandex_disk")
 async def start_yandex_token_input(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("🔐 Введите ваш API токен Яндекс.Диска:")
+    await callback.answer()
+
+    instructions = (
+        "🔐 *Подключение Яндекс.Диска*\n\n"
+        "Чтобы подключить Яндекс.Диск и загружать туда материалы, выполните следующие шаги:\n\n"
+        "Ты можешь прямо сейчас получить OAuth токен на сайте Яндекса:\n"
+        "🔗 https://yandex.ru/dev/disk/poligon/ \n"
+        "Перейди по ссылке.\n"
+        "Нажми Получить OAuth-токен\n"
+        "Авторизуйся под своей учёткой.\n"
+        "Скопируй токен — и вставь в бота\n"
+        "⚠️ Такой токен действителен до его отзыва вручную.\n"
+    )
+
+    await callback.message.answer(instructions, parse_mode="Markdown", disable_web_page_preview=True)
     await state.set_state(YandexDiskStates.waiting_for_token)
 
 

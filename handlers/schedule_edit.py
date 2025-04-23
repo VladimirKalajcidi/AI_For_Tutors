@@ -1,68 +1,160 @@
-from aiogram import types, Router, F
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils.markdown import hbold
+from datetime import datetime, timedelta
 from database import crud
-from utils.helpers import parse_datetime_input
-from services.calendar_service import update_event, delete_event
-from keyboards.common import confirm_cancel_kb
-from keyboards.schedule import lesson_action_kb
-from datetime import datetime
+from keyboards.schedule import lesson_action_kb, student_list_kb
 
 router = Router()
 
-class EditLessonState(StatesGroup):
-    waiting_for_new_datetime = State()
-    confirm_cancel = State()
+class AddLessonFSM(StatesGroup):
+    choosing_student = State()
+    entering_date = State()
+    entering_time = State()
+    entering_duration = State()
 
-@router.callback_query(F.data.startswith("lesson_edit_"))
-async def start_edit_lesson(callback: CallbackQuery, state: FSMContext):
-    lesson_id = int(callback.data.split("_")[-1])
-    await state.update_data(lesson_id=lesson_id)
-    
-    await callback.message.edit_text(
-        "Что вы хотите сделать с занятием?",
-        reply_markup=lesson_action_kb(lesson_id)
-    )
+class EditLessonFSM(StatesGroup):
+    entering_date = State()
+    entering_time = State()
+    entering_duration = State()
 
-@router.callback_query(F.data.startswith("edit_datetime_"))
-async def ask_new_datetime(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Введите новую дату и время в формате: 20.04.2025 15:00")
-    await state.set_state(EditLessonState.waiting_for_new_datetime)
+# ─────────────────────── ДОБАВЛЕНИЕ ───────────────────────
 
-@router.message(EditLessonState.waiting_for_new_datetime)
-async def process_new_datetime(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    lesson_id = data["lesson_id"]
+@router.message(F.text == "➕ Добавить занятие")
+async def add_lesson_start(message: Message, state: FSMContext, **data):
+    teacher = data.get("teacher")
+    students = await crud.list_students(teacher)
+    await state.set_state(AddLessonFSM.choosing_student)
+    await state.update_data(teacher_id=teacher.teacher_id)
+    await message.answer("👤 Выберите ученика:", reply_markup=student_list_kb(students))
 
-    new_dt = parse_datetime_input(message.text)
-    if not new_dt:
-        await message.answer("❌ Неверный формат. Попробуйте снова в формате: 20.04.2025 15:00")
+@router.callback_query(F.data.startswith("choose_student:"))
+async def choose_student(callback: CallbackQuery, state: FSMContext):
+    student_id = int(callback.data.split(":")[1])
+    await state.update_data(student_id=student_id)
+    await state.set_state(AddLessonFSM.entering_date)
+    await callback.message.edit_text("📅 Введите дату занятия (в формате ДД.ММ.ГГГГ):")
+
+@router.message(AddLessonFSM.entering_date)
+async def enter_date(message: Message, state: FSMContext):
+    try:
+        date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
+        await state.update_data(date=date.isoformat())
+        await state.set_state(AddLessonFSM.entering_time)
+        await message.answer("🕒 Введите время начала (в формате ЧЧ:ММ):")
+    except ValueError:
+        await message.answer("⚠️ Неверный формат. Введите дату как 20.04.2025")
+
+@router.message(AddLessonFSM.entering_time)
+async def enter_time(message: Message, state: FSMContext):
+    try:
+        time = datetime.strptime(message.text.strip(), "%H:%M").time()
+        await state.update_data(start_time=time.strftime("%H:%M"))
+        await state.set_state(AddLessonFSM.entering_duration)
+        await message.answer("⏱ Укажите продолжительность занятия в минутах (например, 60):")
+    except ValueError:
+        await message.answer("⚠️ Неверный формат времени. Пример: 14:30")
+
+@router.message(AddLessonFSM.entering_duration)
+async def enter_duration(message: Message, state: FSMContext, **data):
+    try:
+        minutes = int(message.text.strip())
+        info = await state.get_data()
+        start_dt = datetime.strptime(f"{info['date']} {info['start_time']}", "%Y-%m-%d %H:%M")
+        end_dt = start_dt + timedelta(minutes=minutes)
+
+        teacher = data["teacher"]
+        student = await crud.get_student(teacher, info["student_id"])
+
+        lesson = await crud.create_lesson(teacher, student, student.subject, start_dt, end_dt)
+
+        await message.answer(
+            f"✅ Занятие добавлено:\n"
+            f"📅 {start_dt.strftime('%d.%m')} с {start_dt.strftime('%H:%M')} до {end_dt.strftime('%H:%M')}\n"
+            f"👤 {student.surname} {student.name} ({student.subject})"
+        )
+        await state.clear()
+    except Exception as e:
+        await message.answer("❌ Ошибка при создании занятия. Попробуйте снова.")
+        print(e)
+
+# ─────────────────────── УПРАВЛЕНИЕ ───────────────────────
+
+@router.message(F.text == "📆 Мои занятия")
+async def list_lessons(message: Message, **data):
+    teacher = data.get("teacher")
+    now = datetime.now()
+    week_later = now + timedelta(days=7)
+    lessons = await crud.get_lessons_for_teacher(teacher.teacher_id, now, week_later)
+    if not lessons:
+        await message.answer("📭 Занятий на ближайшую неделю нет.")
         return
 
-    await crud.update_lesson_datetime(lesson_id, new_dt)
-    await update_event(lesson_id, new_dt)  # обновление в Google Calendar
+    for lesson in lessons:
+        start = datetime.strptime(lesson.data_of_lesson, "%Y-%m-%d %H:%M")
+        end = datetime.strptime(lesson.end_time, "%Y-%m-%d %H:%M")
+        student = await crud.get_student(teacher, lesson.students_id)
+        student_name = f"{student.name} {student.surname}" if student else "—"
+        text = (
+            f"📘 Занятие:"
+            f"👤 {student_name}"
+            f"📅 {start.strftime('%d.%m')} с {start.strftime('%H:%M')} до {end.strftime('%H:%M')}"
+        )
+        await message.answer(text, reply_markup=lesson_action_kb(lesson.lesson_id))
 
-    await message.answer(f"✅ Занятие перенесено на {new_dt.strftime('%d.%m.%Y %H:%M')}")
-    await state.clear()
+@router.callback_query(F.data.startswith("edit_datetime_"))
+async def callback_edit_lesson(callback: CallbackQuery, state: FSMContext):
+    lesson_id = int(callback.data.split("_")[2])
+    await callback.answer()
+    await state.set_state(EditLessonFSM.entering_date)
+    await state.update_data(lesson_id=lesson_id)
+    await callback.message.edit_text("✏️ Введите новую дату (ДД.ММ.ГГГГ):")
+
+@router.message(EditLessonFSM.entering_date)
+async def edit_date(message: Message, state: FSMContext):
+    try:
+        date = datetime.strptime(message.text.strip(), "%d.%m.%Y").date()
+        await state.update_data(date=date.isoformat())
+        await state.set_state(EditLessonFSM.entering_time)
+        await message.answer("🕒 Введите новое время начала (ЧЧ:ММ):")
+    except Exception:
+        await message.answer("❌ Неверный формат. Пример: 20.04.2025")
+
+@router.message(EditLessonFSM.entering_time)
+async def edit_time(message: Message, state: FSMContext):
+    try:
+        time = datetime.strptime(message.text.strip(), "%H:%M").time()
+        await state.update_data(start_time=time.strftime("%H:%M"))
+        await state.set_state(EditLessonFSM.entering_duration)
+        await message.answer("⏱ Введите продолжительность занятия в минутах:")
+    except Exception:
+        await message.answer("❌ Неверный формат времени. Пример: 14:30")
+
+@router.message(EditLessonFSM.entering_duration)
+async def edit_duration(message: Message, state: FSMContext):
+    try:
+        minutes = int(message.text.strip())
+        data = await state.get_data()
+        start = datetime.strptime(f"{data['date']} {data['start_time']}", "%Y-%m-%d %H:%M")
+        end = start + timedelta(minutes=minutes)
+        await crud.update_lesson_datetime(data['lesson_id'], start, end)
+        await message.answer("✅ Время занятия обновлено!")
+        await state.clear()
+    except Exception:
+        await message.answer("❌ Ошибка при сохранении времени занятия.")
 
 @router.callback_query(F.data.startswith("cancel_lesson_"))
-async def confirm_cancel(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(EditLessonState.confirm_cancel)
-    await callback.message.edit_text("Вы уверены, что хотите отменить занятие?", reply_markup=confirm_cancel_kb())
-
-@router.callback_query(EditLessonState.confirm_cancel, F.data == "confirm_yes")
-async def cancel_lesson(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    lesson_id = data["lesson_id"]
-
+async def callback_cancel_lesson(callback: CallbackQuery):
+    lesson_id = int(callback.data.split("_")[2])
     await crud.delete_lesson(lesson_id)
-    await delete_event(lesson_id)  # удаление из Google Calendar
+    await callback.answer("🗑 Урок удалён")
+    await callback.message.delete()
 
-    await callback.message.edit_text("❌ Занятие отменено")
-    await state.clear()
-
-@router.callback_query(EditLessonState.confirm_cancel, F.data == "confirm_no")
-async def cancel_abort(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Операция отменена")
-    await state.clear()
+@router.callback_query(F.data.startswith("mark_done_"))
+async def callback_mark_done(callback: CallbackQuery):
+    lesson_id = int(callback.data.split("_")[2])
+    await crud.set_lesson_notified(lesson_id)
+    await callback.answer("✅ Отмечено как проведённое")
+    await callback.message.edit_reply_markup()

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey, Boolean, DateTime
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -24,11 +24,6 @@ class Teacher(Base):
     link_schedule = Column(String)
     is_logged_in = Column(Boolean, default=True)
     yandex_token = Column(String, nullable=True)  # токен Яндекс.Диска
-    google_access_token = Column(String, nullable=True)
-    google_refresh_token = Column(String, nullable=True)
-
-
-    
 
     students = relationship("Student", back_populates="teacher", cascade="all, delete-orphan")
     lessons = relationship("Lesson", back_populates="teacher", cascade="all, delete-orphan")
@@ -48,27 +43,31 @@ class Student(Base):
     other_inf = Column(Text)
     report_student = Column(Text)
     link_schedule = Column(String)
+    schedule_days = Column(Text, default="[]")  # список дней недели (например, ["Tue", "Thu"])
 
     teacher = relationship("Teacher", back_populates="students")
     lessons = relationship("Lesson", back_populates="student", cascade="all, delete-orphan")
 
 
+
 class Lesson(Base):
     __tablename__ = "lessons"
 
-    lesson_id = Column(Integer, primary_key=True, autoincrement=True)
+    lesson_id = Column(Integer, primary_key=True)
     teacher_id = Column(Integer, ForeignKey("teachers.teacher_id"))
     students_id = Column(Integer, ForeignKey("students.students_id"))
-    data_of_lesson = Column(String)  # Можно DateTime, если будешь работать с датами
-    passed = Column(Boolean)  # 0/1, но мапим в Python булево
-    link_report = Column(String)
-    link_HW = Column(String)
-    link_HW_verified = Column(String)
-    link_test = Column(String)
-    link_test_verified = Column(String)
-    link_plan = Column(String)
-    google_event_id = Column(String, nullable=True)
+    data_of_lesson = Column(String)
+    end_time = Column(String)
+    passed = Column(Boolean, default=False)
 
+    # Добавь эти поля, если они будут использоваться
+    link_plan = Column(String, nullable=True)
+    link_report = Column(String, nullable=True)
+    link_test = Column(String, nullable=True)
+    link_test_verified = Column(String, nullable=True)
+    link_HW = Column(String, nullable=True)
+    link_HW_verified = Column(String, nullable=True)
 
-    teacher = relationship("Teacher", back_populates="lessons")
+    # Если нужно:
     student = relationship("Student", back_populates="lessons")
+    teacher = relationship("Teacher", back_populates="lessons")

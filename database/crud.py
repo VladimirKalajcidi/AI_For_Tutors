@@ -4,9 +4,7 @@ from . import db, models
 from database.models import Teacher
 from database.db import async_session
 
-
 # ──────── TEACHER ────────
-
 
 async def get_teacher_by_login(login: str):
     async with async_session() as session:
@@ -17,7 +15,6 @@ async def get_teacher_by_telegram_id(telegram_id: int):
     async with async_session() as session:
         result = await session.execute(select(models.Teacher).filter_by(telegram_id=telegram_id))
         return result.scalars().first()
-
 
 async def get_teacher_by_id(teacher_id: int):
     async with async_session() as session:
@@ -40,12 +37,10 @@ async def create_teacher(login: str, password_hash: str, telegram_id: int, name:
         await session.refresh(teacher)
         return teacher
 
-async def update_teacher(teacher: models.Teacher):
+async def update_teacher(teacher: Teacher):
     async with async_session() as session:
-        await session.merge(teacher)
+        session.add(teacher)
         await session.commit()
-        return teacher
-
 
 async def update_teacher_field(teacher, field: str, value: str):
     async with async_session() as session:
@@ -54,19 +49,8 @@ async def update_teacher_field(teacher, field: str, value: str):
             setattr(db_teacher, field, value)
             await session.commit()
             setattr(teacher, field, value)  # обновим локально
-            
-
-async def update_teacher(teacher: Teacher):
-    async with async_session() as session:
-        session.add(teacher)
-        await session.commit()
-
-
 
 # ──────── STUDENT ────────
-
-# crud.py
-
 
 async def create_student(
     teacher,
@@ -94,12 +78,10 @@ async def create_student(
         await session.refresh(student)
         return student
 
-
 async def list_students(teacher):
     async with async_session() as session:
         result = await session.execute(select(models.Student).where(models.Student.teacher_id == teacher.teacher_id))
         return result.scalars().all()
-
 
 async def get_student_full_profile(teacher, student_id):
     async with async_session() as session:
@@ -121,7 +103,6 @@ async def get_student_full_profile(teacher, student_id):
             "next_date": teacher.link_schedule
         }
 
-
 async def get_student(teacher, student_id):
     async with async_session() as session:
         result = await session.execute(
@@ -131,7 +112,6 @@ async def get_student(teacher, student_id):
             )
         )
         return result.scalar_one_or_none()
-
 
 async def list_subjects_from_students(teacher: models.Teacher):
     async with async_session() as session:
@@ -156,15 +136,15 @@ async def delete_student(teacher, student_id):
             await session.delete(student)
             await session.commit()
 
-
 # ──────── LESSON ────────
 
-async def create_lesson(teacher: models.Teacher, student: models.Student, subject: str, time: datetime, title: str = ""):
+async def create_lesson(teacher: models.Teacher, student: models.Student, subject: str, start_time: datetime, end_time: datetime, title: str = ""):
     async with async_session() as session:
         lesson = models.Lesson(
             teacher_id=teacher.teacher_id,
             students_id=student.students_id,
-            data_of_lesson=time.strftime("%Y-%m-%d %H:%M"),
+            data_of_lesson=start_time.strftime("%Y-%m-%d %H:%M"),
+            end_time=end_time.strftime("%Y-%m-%d %H:%M"),
             passed=False,
             link_plan="",
             link_report="",
@@ -209,3 +189,32 @@ async def set_lesson_notified(lesson_id: int):
             await session.commit()
         return lesson
 
+async def get_lessons_for_teacher(teacher_id: int, start: datetime, end: datetime):
+    async with async_session() as session:
+        result = await session.execute(
+            select(models.Lesson)
+            .where(models.Lesson.teacher_id == teacher_id)
+            .where(models.Lesson.data_of_lesson >= start.strftime("%Y-%m-%d %H:%M"))
+            .where(models.Lesson.data_of_lesson <= end.strftime("%Y-%m-%d %H:%M"))
+            .order_by(models.Lesson.data_of_lesson)
+        )
+        return result.scalars().all()
+
+async def delete_lesson(lesson_id: int):
+    async with async_session() as session:
+        lesson = await session.get(models.Lesson, lesson_id)
+        if lesson:
+            await session.delete(lesson)
+            await session.commit()
+            return True
+        return False
+
+async def update_lesson_datetime(lesson_id: int, new_start: datetime, new_end: datetime):
+    async with async_session() as session:
+        lesson = await session.get(models.Lesson, lesson_id)
+        if lesson:
+            lesson.data_of_lesson = new_start.strftime("%Y-%m-%d %H:%M")
+            lesson.end_time = new_end.strftime("%Y-%m-%d %H:%M")
+            await session.commit()
+            return lesson
+        return None

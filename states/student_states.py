@@ -10,3 +10,4 @@ class StudentStates(StatesGroup):
     enter_profile = State()
     waiting_for_file = State()
     editing_field = State() 
+    editing_days = State()

@@ -31,15 +31,15 @@ async def upload_bytes_to_yandex(
     file_obj: io.BytesIO,
     teacher,
     student,
-    category: str,  # Примеры: "Домашние работы", "Контрольные", "Планы", "Материалы", "Проверено"
-    filename_base: str
+    category: str,  # Примеры: "Домашняя_работа", "Контрольная", "План", "Материалы", "Проверено"
+    filename_base: str  # не используется — оставлен для совместимости
 ) -> bool:
     token = teacher.yandex_token or config.YANDEX_DISK_TOKEN
     client = get_client(token)
     if not client:
         return False
 
-    # Папка: /TutorBot/Иван_Иванов_7/Домашние работы
+    # Папка: /TutorBot/Иван_Иванов_7/Категория
     student_folder = get_student_folder(student)
     base_path = "/TutorBot"
     student_path = f"{base_path}/{student_folder}"
@@ -51,13 +51,9 @@ async def upload_bytes_to_yandex(
         await asyncio.to_thread(ensure_folder_exists, client, student_path)
         await asyncio.to_thread(ensure_folder_exists, client, category_path)
 
-        # Подсчёт номера файла
-        existing_files = await asyncio.to_thread(lambda: list(client.listdir(category_path)))
-        file_number = len(existing_files)
-
-        # Финальное имя
-        today = datetime.now().strftime("%Y-%m-%d")
-        final_filename = f"{file_number:02d}_{filename_base}_{today}.pdf"
+        # Имя файла: "Домашняя_работа_25_02_2024.pdf"
+        today = datetime.now().strftime("%d_%m_%Y")
+        final_filename = f"{category}_{today}.pdf"
         remote_path = f"{category_path}/{final_filename}"
 
         # Загрузка

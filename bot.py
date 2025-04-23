@@ -6,6 +6,8 @@ import config
 from handlers import auth, subjects, students, schedule, settings, payment, schedule_edit, google_auth
 from middlewares.auth_middleware import AuthMiddleware
 from services import notification_service
+from handlers import schedule_week  # ДОБАВЬ это
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,6 +23,8 @@ async def main():
     dp.include_router(payment.router)
     dp.include_router(schedule_edit.router)
     dp.include_router(google_auth.router)
+    dp.include_router(schedule_week.router)  # ДОБАВЬ это
+
 
     # Middlewares
     dp.message.middleware(AuthMiddleware())

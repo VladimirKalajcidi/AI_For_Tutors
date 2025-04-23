@@ -25,6 +25,6 @@ def settings_menu_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Редактировать профиль", callback_data="edit_profile")],
         [InlineKeyboardButton(text="🔗 Подключить Яндекс.Диск", callback_data="link_yandex_disk")],
-        [InlineKeyboardButton(text="🔗 Подключить Google Calendar", callback_data="google_auth")],
+        #[InlineKeyboardButton(text="🔗 Подключить Google Calendar", callback_data="google_auth")],
         [InlineKeyboardButton(text="🌍 Change Language", callback_data="set_lang")],
     ])

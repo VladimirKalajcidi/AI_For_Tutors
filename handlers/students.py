@@ -160,6 +160,7 @@ async def back_to_students(callback: CallbackQuery, **data):
     else:
         await callback.message.edit_text("Your students:", reply_markup=students_list_keyboard(students))
 
+
 @router.callback_query(Text(startswith="genplan:"))
 async def callback_generate_plan(callback: CallbackQuery, **data):
     teacher = data.get("teacher")
@@ -175,7 +176,6 @@ async def callback_generate_plan(callback: CallbackQuery, **data):
     from services import gpt_service, storage_service
     plan_text = await gpt_service.generate_study_plan(student, language=teacher.language)
     pdf_path = storage_service.generate_plan_pdf(plan_text, student.name)
-    file_name = f"StudyPlan_{student.name}.pdf"
 
     try:
         await callback.message.answer_document(
@@ -185,9 +185,17 @@ async def callback_generate_plan(callback: CallbackQuery, **data):
     except Exception:
         await callback.message.answer("📋 Study Plan:\n" + plan_text)
 
-    if hasattr(teacher, "yandex_token") and teacher.yandex_token:
-        success = await storage_service.upload_file(pdf_path, teacher, file_name, folder="plans")
-        await callback.message.answer("📁 Plan saved to Yandex Disk." if success else "⚠️ Failed to upload to Yandex Disk.")
+    if teacher.yandex_token:
+        with open(pdf_path, "rb") as f:
+            buffer = BytesIO(f.read())
+            buffer.seek(0)
+        await upload_bytes_to_yandex(
+            file_obj=buffer,
+            teacher=teacher,
+            student=student,
+            category="План",
+            filename_base="_"
+        )
 
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
@@ -195,6 +203,7 @@ async def callback_generate_plan(callback: CallbackQuery, **data):
         f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
+
 
 
 @router.callback_query(Text(startswith="genassign:"))
@@ -224,12 +233,25 @@ async def callback_generate_assignment(callback: CallbackQuery, **data):
     except Exception:
         await callback.message.answer(f"📑 Assignment:\n{assignment_text}")
 
+    if teacher.yandex_token:
+        with open(pdf_path, "rb") as f:
+            buffer = BytesIO(f.read())
+            buffer.seek(0)
+        await upload_bytes_to_yandex(
+            file_obj=buffer,
+            teacher=teacher,
+            student=student,
+            category="Классная_работа",
+            filename_base="_"
+        )
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Subject: {student.subject or 'N/A'}\n"
         f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
+
 
 
 
@@ -323,6 +345,18 @@ async def callback_generate_homework(callback: CallbackQuery, **data):
     except Exception:
         await callback.message.answer(f"📄 Homework:\n{text}")
 
+    if teacher.yandex_token:
+        with open(pdf_path, "rb") as f:
+            buffer = BytesIO(f.read())
+            buffer.seek(0)
+        await upload_bytes_to_yandex(
+            file_obj=buffer,
+            teacher=teacher,
+            student=student,
+            category="Домашняя_работа",
+            filename_base="_"
+        )
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Subject: {student.subject or 'N/A'}\n"
@@ -358,6 +392,18 @@ async def callback_generate_classwork(callback: CallbackQuery, **data):
     except Exception:
         await callback.message.answer(f"📄 Classwork:\n{text}")
 
+    if teacher.yandex_token:
+        with open(pdf_path, "rb") as f:
+            buffer = BytesIO(f.read())
+            buffer.seek(0)
+        await upload_bytes_to_yandex(
+            file_obj=buffer,
+            teacher=teacher,
+            student=student,
+            category="Контрольная_работа",
+            filename_base="_"
+        )
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Subject: {student.subject or 'N/A'}\n"
@@ -392,12 +438,25 @@ async def callback_generate_materials(callback: CallbackQuery, **data):
     except Exception:
         await callback.message.answer(f"📄 Learning Materials:\n{text}")
 
+    if teacher.yandex_token:
+        with open(pdf_path, "rb") as f:
+            buffer = BytesIO(f.read())
+            buffer.seek(0)
+        await upload_bytes_to_yandex(
+            file_obj=buffer,
+            teacher=teacher,
+            student=student,
+            category="Обучающие_материалы",
+            filename_base="_"
+        )
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Subject: {student.subject or 'N/A'}\n"
         f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
+
 
 
 @router.callback_query(Text(startswith="edit_student:"))
@@ -548,3 +607,46 @@ async def handle_file_upload(message: Message, state: FSMContext, teacher):
         await message.answer(f"✅ Файл загружен в папку `{category}` на Яндекс.Диске.")
     else:
         await message.answer("❌ Ошибка загрузки файла.")
+
+
+...
+
+@router.callback_query(Text(startswith="edit_days:"))
+async def callback_edit_days(callback: CallbackQuery, state: FSMContext):
+    students_id = int(callback.data.split(":")[1])
+    await state.set_state(StudentStates.editing_days)
+    await state.update_data(students_id=students_id, selected_days=[])
+
+    buttons = [
+        [types.InlineKeyboardButton(text=day, callback_data=f"toggle_day:{day}") for day in ["Mon", "Tue", "Wed"]],
+        [types.InlineKeyboardButton(text=day, callback_data=f"toggle_day:{day}") for day in ["Thu", "Fri", "Sat"]],
+        [types.InlineKeyboardButton(text="✅ Сохранить", callback_data="save_days"),
+         types.InlineKeyboardButton(text="❌ Отмена", callback_data=f"student:{students_id}")]
+    ]
+    await callback.message.edit_text(
+        "Выберите дни занятий (нажмите несколько раз для выбора/отмены):",
+        reply_markup=types.InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+@router.callback_query(Text(startswith="toggle_day:"))
+async def toggle_day_selection(callback: CallbackQuery, state: FSMContext):
+    day = callback.data.split(":")[1]
+    data = await state.get_data()
+    selected_days = data.get("selected_days", [])
+    if day in selected_days:
+        selected_days.remove(day)
+    else:
+        selected_days.append(day)
+    await state.update_data(selected_days=selected_days)
+    await callback.answer(f"{'Убрано' if day not in selected_days else 'Добавлено'}: {day}", show_alert=False)
+
+@router.callback_query(Text("save_days"))
+async def save_schedule_days(callback: CallbackQuery, state: FSMContext, **data):
+    teacher = data.get("teacher")
+    state_data = await state.get_data()
+    students_id = state_data.get("students_id")
+    selected_days = state_data.get("selected_days", [])
+
+    await crud.update_student_field(teacher, students_id, "schedule_days", json.dumps(selected_days))
+    await state.clear()
+    await callback.message.answer("✅ Дни занятий обновлены!", reply_markup=student_actions_keyboard(students_id))

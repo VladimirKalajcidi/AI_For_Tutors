@@ -14,7 +14,7 @@ def students_list_keyboard(students):
                     callback_data=f"student:{student.students_id}"
                 )
             ])
-    
+
     buttons.append([
         InlineKeyboardButton(text="➕ Add Student", callback_data="add_student")
     ])
@@ -34,7 +34,7 @@ def student_actions_keyboard(student_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📤 Отправить файл", callback_data=f"upload:{student_id}")],
         [InlineKeyboardButton(text="✏️ Редактировать", callback_data=f"edit_student:{student_id}")],
         [InlineKeyboardButton(text="🗑 Удалить", callback_data=f"delete_student:{student_id}")],
-
+        [InlineKeyboardButton(text="📆 Дни занятий", callback_data=f"edit_days:{student_id}")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_students")]
     ])
 
@@ -58,5 +58,3 @@ def edit_student_keyboard(student_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Доп. инфо", callback_data=f"edit_field:{student_id}:other_inf")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data=f"student:{student_id}")]
     ])
-
-
