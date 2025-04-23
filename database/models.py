@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey, Boolean, DateTime, Time
 from sqlalchemy.orm import declarative_base, relationship
+
 
 Base = declarative_base()
 
@@ -56,11 +57,12 @@ class Lesson(Base):
     lesson_id = Column(Integer, primary_key=True)
     teacher_id = Column(Integer, ForeignKey("teachers.teacher_id"))
     students_id = Column(Integer, ForeignKey("students.students_id"))
-    data_of_lesson = Column(String)
-    end_time = Column(String)
+    data_of_lesson = Column(Date)
+    start_time = Column(Time)
+    end_time = Column(Time)
     passed = Column(Boolean, default=False)
+    is_regular = Column(Boolean, default=False)
 
-    # Добавь эти поля, если они будут использоваться
     link_plan = Column(String, nullable=True)
     link_report = Column(String, nullable=True)
     link_test = Column(String, nullable=True)
@@ -68,6 +70,5 @@ class Lesson(Base):
     link_HW = Column(String, nullable=True)
     link_HW_verified = Column(String, nullable=True)
 
-    # Если нужно:
     student = relationship("Student", back_populates="lessons")
     teacher = relationship("Teacher", back_populates="lessons")

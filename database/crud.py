@@ -3,6 +3,8 @@ from sqlalchemy import select
 from . import db, models
 from database.models import Teacher
 from database.db import async_session
+from sqlalchemy import select, delete, desc
+from database.models import Lesson
 
 # ──────── TEACHER ────────
 
@@ -138,13 +140,16 @@ async def delete_student(teacher, student_id):
 
 # ──────── LESSON ────────
 
+from datetime import datetime
+
 async def create_lesson(teacher: models.Teacher, student: models.Student, subject: str, start_time: datetime, end_time: datetime, title: str = ""):
     async with async_session() as session:
         lesson = models.Lesson(
             teacher_id=teacher.teacher_id,
             students_id=student.students_id,
-            data_of_lesson=start_time.strftime("%Y-%m-%d %H:%M"),
-            end_time=end_time.strftime("%Y-%m-%d %H:%M"),
+            data_of_lesson=start_time.date(),
+            start_time=start_time.time(),
+            end_time=end_time.time(),
             passed=False,
             link_plan="",
             link_report="",
@@ -157,6 +162,7 @@ async def create_lesson(teacher: models.Teacher, student: models.Student, subjec
         await session.commit()
         await session.refresh(lesson)
         return lesson
+
 
 async def list_upcoming_lessons(teacher: models.Teacher, from_time: datetime = None):
     async with async_session() as session:
@@ -194,11 +200,12 @@ async def get_lessons_for_teacher(teacher_id: int, start: datetime, end: datetim
         result = await session.execute(
             select(models.Lesson)
             .where(models.Lesson.teacher_id == teacher_id)
-            .where(models.Lesson.data_of_lesson >= start.strftime("%Y-%m-%d %H:%M"))
-            .where(models.Lesson.data_of_lesson <= end.strftime("%Y-%m-%d %H:%M"))
-            .order_by(models.Lesson.data_of_lesson)
+            .where(models.Lesson.data_of_lesson >= start.date())
+            .where(models.Lesson.data_of_lesson <= end.date())
+            .order_by(models.Lesson.data_of_lesson, models.Lesson.start_time)
         )
         return result.scalars().all()
+
 
 async def delete_lesson(lesson_id: int):
     async with async_session() as session:
@@ -218,3 +225,38 @@ async def update_lesson_datetime(lesson_id: int, new_start: datetime, new_end: d
             await session.commit()
             return lesson
         return None
+    
+async def set_student_schedule_template(teacher, student_id, days, start_time, end_time):
+    from datetime import datetime, timedelta
+
+    async with async_session() as session:
+        now = datetime.now()
+
+        for day_abbr in days:
+            # Определим индекс дня недели и ближайшую дату
+            weekday_index = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].index(day_abbr)
+            date_target = now + timedelta(days=(weekday_index - now.weekday()) % 7)
+
+            # Удалим только старые уроки на этот день
+            await session.execute(
+                delete(Lesson).where(
+                    Lesson.students_id == student_id,
+                    Lesson.is_regular == True,
+                    Lesson.data_of_lesson == date_target.date()
+                )
+            )
+
+            # Добавим новое занятие
+            schedule = Lesson(
+                teacher_id=teacher.teacher_id,
+                students_id=student_id,
+                data_of_lesson=date_target.date(),
+                start_time=start_time,
+                end_time=end_time,
+                is_regular=True
+            )
+            session.add(schedule)
+
+        await session.commit()
+
+

@@ -143,7 +143,13 @@ async def callback_view_student(callback: types.CallbackQuery, **data):
         await callback.answer("⚠️ Ошибка авторизации", show_alert=True)
         return
 
-    students_id = int(callback.data.split(":")[1])
+    parts = callback.data.split(":")
+    if len(parts) < 2 or not parts[1].isdigit():
+        await callback.answer("❌ Ошибка: ID ученика не передан.")
+        return
+
+    students_id = int(parts[1])
+
     student = await crud.get_student(teacher, students_id)
     if not student:
         await callback.answer("Student not found.", show_alert=True)
@@ -651,22 +657,86 @@ async def callback_edit_days(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(Text(startswith="toggle_day:"))
 async def toggle_day_selection(callback: CallbackQuery, state: FSMContext):
     day = callback.data.split(":")[1]
-    data = await state.get_data()
-    selected_days = data.get("selected_days", [])
-    if day in selected_days:
-        selected_days.remove(day)
-    else:
-        selected_days.append(day)
-    await state.update_data(selected_days=selected_days)
-    await callback.answer(f"{'Убрано' if day not in selected_days else 'Добавлено'}: {day}", show_alert=False)
+    await state.update_data(current_day=day)
+    await callback.message.answer(f"🕓 Укажите время занятий в формате HH:MM-HH:MM для {day}:")
+    await state.set_state(StudentStates.enter_day_time)
+
 
 @router.callback_query(Text("save_days"))
 async def save_schedule_days(callback: CallbackQuery, state: FSMContext, **data):
+    from datetime import time
     teacher = data.get("teacher")
     state_data = await state.get_data()
     students_id = state_data.get("students_id")
-    selected_days = state_data.get("selected_days", [])
+    schedule = state_data.get("schedule_data", {})
 
-    await crud.update_student_field(teacher, students_id, "schedule_days", json.dumps(selected_days))
+    for day, time_range in schedule.items():
+        start_h, start_m = map(int, time_range["start"].split(":"))
+        end_h, end_m = map(int, time_range["end"].split(":"))
+        await crud.set_student_schedule_template(
+            teacher=teacher,
+            student_id=students_id,
+            days=[day],
+            start_time=time(start_h, start_m),
+            end_time=time(end_h, end_m)
+        )
+
     await state.clear()
-    await callback.message.answer("✅ Дни занятий обновлены!", reply_markup=student_actions_keyboard(students_id))
+    await callback.message.answer("✅ Дни и время занятий обновлены!", reply_markup=student_actions_keyboard(students_id))
+
+
+
+@router.message(StudentStates.set_schedule_time)
+async def process_schedule_time(message: Message, state: FSMContext, **data):
+    import json
+    from database import crud
+    from datetime import time
+
+    teacher = data.get("teacher")
+    input_time = message.text.strip()
+    try:
+        start_str, end_str = input_time.split("-")
+        start_h, start_m = map(int, start_str.split(":"))
+        end_h, end_m = map(int, end_str.split(":"))
+        start_time = time(start_h, start_m)
+        end_time = time(end_h, end_m)
+    except Exception:
+        await message.answer("❌ Неверный формат времени. Укажите как HH:MM-HH:MM (например, 16:00-17:30).")
+        return
+
+    state_data = await state.get_data()
+    students_id = state_data.get("students_id")
+    days = state_data.get("selected_days", [])
+
+    # 🗓️ Сохраняем расписание в БД через crud
+    await crud.set_student_schedule_template(
+        teacher=teacher,
+        student_id=students_id,
+        days=days,
+        start_time=start_time,
+        end_time=end_time
+    )
+
+    await message.answer("✅ Регулярное расписание обновлено!", reply_markup=student_actions_keyboard(students_id))
+    await state.clear()
+
+
+@router.message(StudentStates.enter_day_time)
+async def process_day_time(message: Message, state: FSMContext):
+    input_time = message.text.strip()
+    data = await state.get_data()
+    day = data.get("current_day")
+    schedule = data.get("schedule_data", {})
+
+    try:
+        start_str, end_str = input_time.split("-")
+        start_h, start_m = map(int, start_str.split(":"))
+        end_h, end_m = map(int, end_str.split(":"))
+        schedule[day] = {"start": f"{start_h:02}:{start_m:02}", "end": f"{end_h:02}:{end_m:02}"}
+        await state.update_data(schedule_data=schedule)
+    except Exception:
+        await message.answer("❌ Неверный формат. Пример: 16:00-17:30")
+        return
+
+    await message.answer("✅ Время сохранено. Выберите ещё день или нажмите «Сохранить».")
+    await state.set_state(StudentStates.editing_days)

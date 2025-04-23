@@ -32,9 +32,14 @@ async def weekly_schedule_view(message: types.Message, **data):
         return
 
     # Группировка по дням
+
+    print("🔍 Найдено занятий:", len(lessons))
+    for lesson in lessons:
+        print("🧾", lesson.data_of_lesson, lesson.start_time, lesson.students_id)
+
     day_map = {}
     for lesson in lessons:
-        day_key = datetime.strptime(lesson.data_of_lesson, "%Y-%m-%d %H:%M").date()
+        day_key = lesson.data_of_lesson  # уже date-объект
         if day_key not in day_map:
             day_map[day_key] = []
         day_map[day_key].append(lesson)
@@ -44,10 +49,11 @@ async def weekly_schedule_view(message: types.Message, **data):
     text = f"🗓 Ваше расписание на неделю:\n\n"
     for day in sorted_days:
         text += f"{day.strftime('%A, %d.%m')}\n"
-        for lesson in sorted(day_map[day], key=lambda l: l.data_of_lesson):
+        for lesson in sorted(day_map[day], key=lambda l: l.start_time):
             student = await crud.get_student(teacher, lesson.students_id)
-            start_time = datetime.strptime(lesson.data_of_lesson, "%Y-%m-%d %H:%M").strftime("%H:%M")
-            end_time = datetime.strptime(lesson.end_time, "%Y-%m-%d %H:%M").strftime("%H:%M")
+            start_time = lesson.start_time.strftime("%H:%M") if lesson.start_time else "?"
+            end_time = lesson.end_time.strftime("%H:%M") if lesson.end_time else "?"
+
             student_name = f"{student.name} {student.surname}" if student else "(ученик удалён)"
             subject = student.subject if student else ""
             text += f"▪️ {start_time}–{end_time} — {student_name} ({subject})\n"
