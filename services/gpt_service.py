@@ -1,105 +1,132 @@
-import time
-import httpx
 import json
-from config import PROXYAPI_KEY
+import httpx
+from aiogram import Bot
+from config import OPENAI_API_KEY, BOT_TOKEN
+from openai import AsyncOpenAI
 from services.storage_service import list_student_materials_by_name
 
-API_URL = "https://api.proxyapi.ru/openai/v1/chat/completions"
-MODEL = "gpt-4.1"
-HEADERS = {
-    "Authorization": f"Bearer {PROXYAPI_KEY}",
-    "Content-Type": "application/json"
-}
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+bot = Bot(token=BOT_TOKEN)
+TG_ADMIN_ID = 922135759
+FOREIGN_GPT_ENDPOINT = "http://80.74.26.222/gpt"
+
+
+def build_prompt_context(student, language="ru"):
+    name = student.name
+    subject = student.subject or ("предмет" if language == "ru" else "subject")
+    try:
+        extra = json.loads(student.other_inf or "{}")
+        profile = extra.get("profile") or f"{extra.get('goal', '')}, уровень: {extra.get('level', '')}"
+    except Exception:
+        profile = student.other_inf or ""
+    return name, subject, profile
+
+
+import httpx
+
+FOREIGN_GPT_ENDPOINT = "http://80.74.26.222:8000/gpt"
+
+async def ask_gpt(prompt: str, system_prompt: str = "", temperature=0.7):
+    print("📤 [ask_gpt] Отправка запроса на иностранный сервер...")
+
+    try:
+        payload = {
+            "prompt": prompt,
+            "system_prompt": system_prompt,
+            "temperature": temperature
+        }
+        print("📦 Payload:", payload)
+
+        async with httpx.AsyncClient(timeout=30) as client_http:
+            response = await client_http.post(FOREIGN_GPT_ENDPOINT, json=payload)
+            print(f"✅ Ответ от сервера: {response.status_code}")
+
+            response.raise_for_status()
+            json_data = response.json()
+            print("📥 Получено JSON:", json_data)
+
+            return json_data["content"]
+    except Exception as e:
+        print("❌ Ошибка при обращении к серверу:", repr(e))
+        return "⚠️ GPT недоступен. Попробуйте позже."
 
 
 async def generate_study_plan(student, language="ru"):
-    name = student.name
-    subject_name = student.subject or "предмет"
-    try:
-        extra = json.loads(student.other_inf or "{}")
-        profile_info = extra.get("profile") or f"{extra.get('goal', '')}, уровень: {extra.get('level', '')}"
-    except Exception:
-        profile_info = student.other_inf or ""
-
+    name, subject, profile = build_prompt_context(student, language)
     materials = await list_student_materials_by_name(name)
-    context = "\n".join([f"- {f}" for f in materials]) if materials else "(нет данных)"
-
-    if language == "ru":
-        prompt = f"Составь подробный учебный план по предмету {subject_name} для ученика {name}. "
-        if profile_info:
-            prompt += f"Исходные данные об ученике: {profile_info}. "
-        prompt += f"Ранее выданные материалы:\n{context}\n"
-        prompt += "Распредели темы по занятиям и укажи цели каждого этапа."
-    else:
-        prompt = f"Create a detailed study plan for {subject_name} for the student {name}. "
-        if profile_info:
-            prompt += f"Student info: {profile_info}. "
-        prompt += f"Previously provided materials:\n{context}\n"
-        prompt += "Outline topics by session and state the objectives for each stage."
-
-    return await send_proxyapi_request({
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_completion_tokens": 3000
-    })
+    context = "\n".join(f"- {m}" for m in materials) if materials else "(нет данных)"
+    prompt = (
+        f"Составь подробный учебный план по предмету {subject} для ученика {name}. "
+        f"Исходные данные об ученике: {profile}. "
+        f"Ранее выданные материалы:\n{context}\n"
+        f"Распредели темы по занятиям и укажи цели каждого этапа."
+        if language == "ru" else
+        f"Create a detailed study plan for {subject} for student {name}. "
+        f"Student info: {profile}. "
+        f"Previously provided materials:\n{context}\n"
+        f"Outline topics by session and state the objectives."
+    )
+    return await ask_gpt(prompt, system_prompt="You are an experienced educational methodologist.", temperature=0.7)
 
 
-async def generate_assignment(student, language="ru"):
-    name = student.name
-    subject_name = student.subject or "предмет"
-    try:
-        extra = json.loads(student.other_inf or "{}")
-        profile_info = extra.get("profile") or f"{extra.get('goal', '')}, уровень: {extra.get('level', '')}"
-    except Exception:
-        profile_info = student.other_inf or ""
-
-    topic = "предыдущие темы"
-
-    materials = await list_student_materials_by_name(name)
-    context = "\n".join([f"- {f}" for f in materials]) if materials else "(нет данных)"
-
-    if language == "ru":
-        prompt = f"Составь задание по предмету {subject_name} для ученика {name}. "
-        if profile_info:
-            prompt += f"Уровень: {profile_info}. "
-        prompt += f"Тема последнего урока: {topic}. "
-        prompt += f"Ранее выданные материалы:\n{context}\n"
-        prompt += "Задания должны включать теоретическую часть и практические упражнения."
-    else:
-        prompt = f"Create an assignment in {subject_name} for student {name}. "
-        if profile_info:
-            prompt += f"Level: {profile_info}. "
-        prompt += f"Last lesson topic: {topic}. "
-        prompt += f"Previously provided materials:\n{context}\n"
-        prompt += "Include both theoretical and practical exercises."
-
-    return await send_proxyapi_request({
-        "model": MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_completion_tokens": 3000
-    })
+async def generate_assignment(student, topic=None, num_questions=5, language="ru"):
+    name, subject, profile = build_prompt_context(student, language)
+    topic = topic or ("последняя изученная тема" if language == "ru" else "last studied topic")
+    prompt = (
+        f"Составь {num_questions} заданий по теме '{topic}' для ученика {name}. "
+        f"Сначала выведи задания, затем ответы отдельно. "
+        f"Уровень знаний: {profile}."
+        if language == "ru" else
+        f"Create {num_questions} exercises on the topic '{topic}' for student {name}. "
+        f"First list the questions, then the answers separately. "
+        f"Level: {profile}."
+    )
+    return await ask_gpt(prompt, system_prompt="You are a helpful AI that creates educational exercises.", temperature=0.7)
 
 
-async def send_proxyapi_request(json_data):
-    try:
-        start_time = time.time()
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(API_URL, headers=HEADERS, json=json_data)
-        duration = time.time() - start_time
+async def check_answer(answer, expected, language="ru"):
+    prompt = (
+        f"Ученик дал такой ответ: {answer}.\n"
+        f"Правильный ответ: {expected}.\n"
+        f"Проверь решение ученика, оцени правильность, объясни ошибки и дай рекомендации."
+        if language == "ru" else
+        f"The student answered: {answer}.\n"
+        f"The correct answer is: {expected}.\n"
+        f"Evaluate the response, explain any mistakes, and give advice."
+    )
+    return await ask_gpt(prompt, system_prompt="You are an assistant that evaluates student work.", temperature=0.5)
 
-        print(f"🧠 Ответ proxyapi за {duration:.2f} сек: {response.status_code}")
-        print(response.text)
 
-        if response.status_code != 200:
-            return f"⚠️ Ошибка {response.status_code}: {response.text}"
+async def generate_report(student, language="ru"):
+    name, subject, profile = build_prompt_context(student, language)
+    notes = getattr(student, "progress_notes", "")
+    prompt = (
+        f"Составь родителям отчёт об успеваемости ученика {name} по предмету {subject}. "
+        f"Данные: {profile}. Прогресс: {notes}."
+        if language == "ru" else
+        f"Write a report for the parents on student {name}'s performance in {subject}. "
+        f"Profile: {profile}. Progress: {notes}."
+    )
+    return await ask_gpt(prompt, system_prompt="You are a professional education analyst.", temperature=0.6)
 
-        result = response.json()
 
-        if "choices" in result and result["choices"]:
-            return result["choices"][0]["message"]["content"].strip()
-        else:
-            return "⚠️ Пустой ответ от модели."
-    except httpx.ReadTimeout:
-        return "⏱ Время ожидания истекло. Попробуйте позже."
-    except Exception as e:
-        return f"❌ Ошибка запроса: {e}"
+async def generate_homework(student, language="ru"):
+    name, subject, profile = build_prompt_context(student, language)
+    study_plan = student.report_student or "(учебный план отсутствует)"
+    all_materials = await list_student_materials_by_name(student.name)
+    last_homework = next((m for m in reversed(all_materials) if "задание" in m.lower() or "домашнее" in m.lower()), None)
+    last_homework_text = last_homework or "(нет предыдущего задания)"
+    prompt = (
+        f"На основе учебного плана:\n{study_plan}\n"
+        f"И предыдущего задания:\n{last_homework_text}\n"
+        f"Сгенерируй новое домашнее задание для ученика {name} по предмету {subject}. "
+        f"Оно должно логично продолжать предыдущую тему и соответствовать уровню: {profile}. "
+        f"Выведи сначала задания, затем — ответы."
+        if language == "ru" else
+        f"Based on the study plan:\n{study_plan}\n"
+        f"And the previous assignment:\n{last_homework_text}\n"
+        f"Create a new homework assignment for student {name} in {subject}. "
+        f"It should logically follow the previous topic and match the level: {profile}. "
+        f"List the tasks first, then the answers."
+    )
+    return await ask_gpt(prompt, system_prompt="You are an educational assistant for creating homework.", temperature=0.7)
