@@ -1,13 +1,10 @@
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.state import StatesGroup, State
-
 
 class AuthStates(StatesGroup):
     register_login = State()
     register_password = State()
     login_username = State()
     login_password = State()
-
 
 class TeacherProfileStates(StatesGroup):
     surname = State()
@@ -16,9 +13,9 @@ class TeacherProfileStates(StatesGroup):
     birth_date = State()
     phone = State()
     email = State()
-    subjects = State()
-    occupation = State()
-    workplace = State()
+    # subjects = State()    # не используем в начальной анкете
+    # occupation = State()  # не используем в начальной анкете
+    # workplace = State()   # не используем в начальной анкете
 
 class TeacherStates(StatesGroup):
     editing_field = State()

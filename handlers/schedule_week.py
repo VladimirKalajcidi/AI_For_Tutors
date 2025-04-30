@@ -11,22 +11,29 @@ router = Router()
 
 def weekly_schedule_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Добавить урок", callback_data="add_lesson_from_week")]
+        [InlineKeyboardButton(text="➕ Добавить занятие", callback_data="add_lesson_from_week")]
     ])
 
 @router.message(Text(text=["📆 Расписание недели", "📆 Weekly Schedule"]))
 async def weekly_schedule_view(message: types.Message, **data):
     teacher = data.get("teacher")
     now = datetime.now()
+    # Проверка подписки
+    try:
+        exp = datetime.fromisoformat(teacher.subscription_expires) if teacher.subscription_expires else None
+    except Exception:
+        exp = None
+    if not exp or exp < now:
+        await message.answer("🔒 Подписка не активна. Продлите подписку, чтобы просматривать расписание.")
+        return
     start_of_week = now - timedelta(days=now.weekday())
     end_of_week = start_of_week + timedelta(days=7)
-
     lessons = await crud.get_lessons_for_teacher(
         teacher_id=teacher.teacher_id,
         start=start_of_week,
         end=end_of_week
     )
-
+    
     if not lessons:
         await message.answer("📭 У вас нет занятий на этой неделе.", reply_markup=weekly_schedule_kb())
         return

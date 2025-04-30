@@ -1,6 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text, Date, ForeignKey, Boolean, DateTime, Time
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Date, Time, Text
 from sqlalchemy.orm import declarative_base, relationship
-
 
 Base = declarative_base()
 
@@ -13,22 +12,27 @@ class Teacher(Base):
     surname = Column(String)
     name = Column(String)
     patronymic = Column(String)
-    birth_date = Column(String)  # Храним как TEXT для совместимости с SQLite
+    birth_date = Column(String)  # дата рождения хранится как текст (YYYY-MM-DD)
     phone = Column(String)
     email = Column(String)
-    language = Column(String, default="ru")      # "ru" or "en"
+    language = Column(String, default="ru")
     telegram_id = Column(Integer, unique=True)
-    subjects = Column(String)  # Можно сделать отдельной таблицей, если потребуется
+    subjects = Column(String)
     occupation = Column(String)
     workplace = Column(String)
-    subscription_expires = Column(String)  # Можно привести к Date, если планируешь сравнения
+    subscription_expires = Column(String)  # дата окончания подписки (строка ISO-формата)
     link_schedule = Column(String)
     is_logged_in = Column(Boolean, default=True)
-    yandex_token = Column(String, nullable=True)  # токен Яндекс.Диска
+    yandex_token = Column(String, nullable=True)
 
+    # Отношения
     students = relationship("Student", back_populates="teacher", cascade="all, delete-orphan")
     lessons = relationship("Lesson", back_populates="teacher", cascade="all, delete-orphan")
 
+    # Дополнительные поля тарифа
+    model = Column(String)                   # выбранная GPT-модель тарифа
+    students_count = Column(Integer, default=0)  # макс. число учеников по тарифу
+    tokens_limit = Column(Integer, default=0)    # лимит токенов (например, на генерацию)
 
 class Student(Base):
     __tablename__ = "students"
@@ -36,7 +40,7 @@ class Student(Base):
     students_id = Column(Integer, primary_key=True)
     name = Column(String)
     surname = Column(String)
-    class_ = Column("class", String)  # "class" — зарезервированное слово, используем псевдоним
+    class_ = Column("class", String)
     subject = Column(String)
     teacher_id = Column(Integer, ForeignKey("teachers.teacher_id"))
     phone = Column(String)
@@ -44,12 +48,13 @@ class Student(Base):
     other_inf = Column(Text)
     report_student = Column(Text)
     link_schedule = Column(String)
-    schedule_days = Column(Text, default="[]")  # список дней недели (например, ["Tue", "Thu"])
-
+    schedule_days = Column(Text, default="[]")
     teacher = relationship("Teacher", back_populates="students")
     lessons = relationship("Lesson", back_populates="student", cascade="all, delete-orphan")
 
-
+    # Учёт генераций GPT
+    generation_month = Column(String, default="")   # месяц учета генераций (формат YYYY-MM)
+    monthly_gen_count = Column(Integer, default=0)  # количество генераций в текущем месяце
 
 class Lesson(Base):
     __tablename__ = "lessons"
@@ -62,13 +67,7 @@ class Lesson(Base):
     end_time = Column(Time)
     passed = Column(Boolean, default=False)
     is_regular = Column(Boolean, default=False)
+    regular_interval = Column(String, default="")  # например, "weekly"
 
-    link_plan = Column(String, nullable=True)
-    link_report = Column(String, nullable=True)
-    link_test = Column(String, nullable=True)
-    link_test_verified = Column(String, nullable=True)
-    link_HW = Column(String, nullable=True)
-    link_HW_verified = Column(String, nullable=True)
-
-    student = relationship("Student", back_populates="lessons")
     teacher = relationship("Teacher", back_populates="lessons")
+    student = relationship("Student", back_populates="lessons")

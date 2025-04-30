@@ -1,119 +1,131 @@
-import io
 import os
-import yadisk
-import config
+import subprocess
+import uuid
 import logging
-from fpdf import FPDF
-import asyncio
+from io import BytesIO
 from datetime import datetime
+
+import yadisk
+from reportlab.pdfgen import canvas
 
 logger = logging.getLogger(__name__)
 
+# Базовый путь к проекту и директория для временного хранения PDF
+BASE_PATH = os.path.dirname(os.path.dirname(__file__))
+PDF_TEMP_DIR = os.path.join(BASE_PATH, "storage", "pdfs")
+# создаём директорию, если не существует
+os.makedirs(PDF_TEMP_DIR, exist_ok=True)
 
-import os
 
-STORAGE_PATH = "/mnt/data/ai_for_tutors_project/AI_For_Tutors/storage/"
-
-async def list_student_materials_by_name(student_name: str) -> list[str]:
+def generate_text_pdf(text: str, file_name: str) -> str:
     """
-    Возвращает список файлов из локального хранилища, содержащих имя ученика.
-    Используется для формирования контекста GPT.
+    Генерирует PDF из простого текста (ReportLab).
     """
-    try:
-        return [
-            f for f in os.listdir(STORAGE_PATH)
-            if student_name.lower() in f.lower()
-        ]
-    except FileNotFoundError:
-        return []
+    pdf_path = os.path.join(PDF_TEMP_DIR, f"{file_name}.pdf")
+    c = canvas.Canvas(pdf_path)
+    y = 800
+    for line in text.splitlines():
+        c.drawString(40, y, line)
+        y -= 15
+        if y < 40:
+            c.showPage()
+            y = 800
+    c.save()
+    return pdf_path
 
 
-
-def get_client(token: str = None):
-    token_to_use = token or config.YANDEX_DISK_TOKEN
-    if not token_to_use:
-        logger.warning("No Yandex.Disk token provided.")
-        return None
-    return yadisk.Client(token=token_to_use)
-
-
-def ensure_folder_exists(client, path: str):
-    if not client.exists(path):
-        client.mkdir(path)
+def generate_plan_pdf(text: str, student_name: str) -> str:
+    """
+    Обёртка над generate_text_pdf для планов.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    file_name = f"Plan_{student_name}_{timestamp}"
+    return generate_text_pdf(text, file_name)
 
 
-def get_student_folder(student) -> str:
-    return f"{student.name}_{student.surname}_{student.students_id}"
+def generate_tex_pdf(tex_code: str, file_name: str) -> str:
+    """
+    Собирает LaTeX-код в PDF при помощи pdflatex.
+    Всегда оборачивает в минимальный шаблон.
+    """
+    # Создаём уникальную папку сборки
+    build_id = uuid.uuid4().hex
+    build_dir = os.path.join(PDF_TEMP_DIR, build_id)
+    os.makedirs(build_dir, exist_ok=True)
+
+    tex_path = os.path.join(build_dir, f"{file_name}.tex")
+    # минимальный LaTeX шаблон
+    preamble = r"""\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
+\usepackage{geometry}
+\geometry{a4paper, margin=25mm}
+\begin{document}
+"""
+    ending = r"\end{document}"
+    full_code = preamble + "\n" + tex_code + "\n" + ending
+
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(full_code)
+    # вызываем pdflatex
+    subprocess.run(
+        ["pdflatex", "-interaction=batchmode", tex_path],
+        cwd=build_dir,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    pdf_path = os.path.join(build_dir, f"{file_name}.pdf")
+    if not os.path.exists(pdf_path):
+        log_path = os.path.join(build_dir, f"{file_name}.log")
+        raise RuntimeError(f"PDF не сгенерирован, проверьте код LaTeX. Смотрите лог: {log_path}")
+    return pdf_path
 
 
 async def upload_bytes_to_yandex(
-    file_obj: io.BytesIO,
+    file_obj: BytesIO,
     teacher,
     student,
-    category: str,  # Примеры: "Домашняя_работа", "Контрольная", "План", "Материалы", "Проверено"
-    filename_base: str  # не используется — оставлен для совместимости
-) -> bool:
-    token = teacher.yandex_token or config.YANDEX_DISK_TOKEN
-    client = get_client(token)
-    if not client:
-        return False
-
-    # Папка: /TutorBot/Иван_Иванов_7/Категория
-    student_folder = get_student_folder(student)
-    base_path = "/TutorBot"
-    student_path = f"{base_path}/{student_folder}"
-    category_path = f"{student_path}/{category}"
-
+    category: str,
+    filename_base: str
+) -> str:
+    """
+    Загружает байты из BytesIO в указанную папку на Яндекс.Диске учителя.
+    Возвращает удалённый путь.
+    """
+    token = getattr(teacher, 'yandex_token', None)
+    if not token:
+        raise RuntimeError("Нет токена Яндекс.Диска в профиле преподавателя.")
+    y = yadisk.YaDisk(token=token)
+    # создаём корневую папку преподавателя, если её нет
+    teacher_dir = f"/{teacher.telegram_id}"
     try:
-        # Создание всех нужных папок
-        await asyncio.to_thread(ensure_folder_exists, client, base_path)
-        await asyncio.to_thread(ensure_folder_exists, client, student_path)
-        await asyncio.to_thread(ensure_folder_exists, client, category_path)
-
-        # Имя файла: "Домашняя_работа_25_02_2024.pdf"
-        today = datetime.now().strftime("%d_%m_%Y")
-        final_filename = f"{category}_{today}.pdf"
-        remote_path = f"{category_path}/{final_filename}"
-
-        # Загрузка
-        await asyncio.to_thread(client.upload, file_obj, remote_path)
-        return True
-
+        if not y.exists(teacher_dir):
+            y.mkdir(teacher_dir)
     except Exception as e:
-        logger.error(f"[YandexDisk Upload Error]: {e}")
-        return False
+        logger.warning(f"Не удалось создать папку преподавателя на Диске: {e}")
+    # создаём папку категории
+    remote_dir = f"{teacher_dir}/{category}"
+    try:
+        if not y.exists(remote_dir):
+            y.mkdir(remote_dir)
+    except Exception as e:
+        logger.warning(f"Не удалось создать папку категории на Диске: {e}")
+    # формируем имя файла и загружаем
+    filename = f"{filename_base}_{student.students_id}_{uuid.uuid4().hex}.pdf"
+    remote_path = f"{remote_dir}/{filename}"
+    try:
+        y.upload(file_obj, remote_path)
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке на Яндекс.Диск: {e}")
+        raise
+    return remote_path
 
 
-def generate_plan_pdf(plan_text: str, student_name: str):
-    pdf = FPDF()
-    pdf.add_page()
-
-    font_path = os.path.join("assets", "fonts", "DejaVuSans.ttf")
-    pdf.add_font("DejaVu", "", font_path, uni=True)
-    pdf.set_font("DejaVu", size=12)
-
-    for line in plan_text.split("\n"):
-        pdf.multi_cell(0, 10, line)
-
-    os.makedirs("storage", exist_ok=True)
-    filename = f"plan_{student_name}.pdf"
-    filepath = os.path.join("storage", filename)
-    pdf.output(filepath)
-
-    return filepath
-
-
-def generate_text_pdf(text: str, filename: str, folder="storage"):
-    path = os.path.join(folder, f"{filename}.pdf")
-    os.makedirs(folder, exist_ok=True)
-
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.add_font("DejaVu", "", "assets/fonts/DejaVuSans.ttf", uni=True)
-    pdf.set_font("DejaVu", size=12)
-
-    for line in text.split("\n"):
-        pdf.multi_cell(0, 10, line)
-
-    pdf.output(path)
-    return path
+def list_student_materials_by_name(name: str) -> list[str]:
+    """
+    Список файлов в storage/materials/{name}
+    """
+    materials_dir = os.path.join(BASE_PATH, "storage", "materials", name)
+    if not os.path.isdir(materials_dir):
+        return []
+    return os.listdir(materials_dir)

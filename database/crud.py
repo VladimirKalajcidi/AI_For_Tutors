@@ -1,5 +1,4 @@
 from datetime import datetime
-from sqlalchemy import select
 from . import db, models
 from database.models import Teacher
 from database.db import async_session
@@ -39,7 +38,8 @@ async def create_teacher(login: str, password_hash: str, telegram_id: int, name:
         await session.refresh(teacher)
         return teacher
 
-async def update_teacher(teacher: Teacher):
+
+async def update_teacher(teacher: models.Teacher):
     async with async_session() as session:
         session.add(teacher)
         await session.commit()
@@ -50,12 +50,12 @@ async def update_teacher_field(teacher, field: str, value: str):
         if db_teacher:
             setattr(db_teacher, field, value)
             await session.commit()
-            setattr(teacher, field, value)  # обновим локально
+            setattr(teacher, field, value)
 
 # ──────── STUDENT ────────
 
 async def create_student(
-    teacher,
+    teacher: models.Teacher,
     name: str,
     surname: str,
     class_: str,
@@ -73,16 +73,20 @@ async def create_student(
             teacher_id=teacher.teacher_id,
             phone=phone,
             parent_phone=parent_phone,
-            other_inf=other_inf,
+            other_inf=other_inf
         )
         session.add(student)
         await session.commit()
         await session.refresh(student)
         return student
 
-async def list_students(teacher):
+
+async def list_students(teacher: models.Teacher):
     async with async_session() as session:
-        result = await session.execute(select(models.Student).where(models.Student.teacher_id == teacher.teacher_id))
+        result = await session.execute(
+            select(models.Student)
+            .where(models.Student.teacher_id == teacher.teacher_id)
+        )
         return result.scalars().all()
 
 async def get_student_full_profile(teacher, student_id):
@@ -105,13 +109,12 @@ async def get_student_full_profile(teacher, student_id):
             "next_date": teacher.link_schedule
         }
 
-async def get_student(teacher, student_id):
+async def get_student(teacher: models.Teacher, student_id: int):
     async with async_session() as session:
         result = await session.execute(
-            select(models.Student).where(
-                models.Student.teacher_id == teacher.teacher_id,
-                models.Student.students_id == student_id
-            )
+            select(models.Student)
+            .where(models.Student.teacher_id == teacher.teacher_id,
+                   models.Student.students_id == student_id)
         )
         return result.scalar_one_or_none()
 
@@ -124,39 +127,68 @@ async def list_subjects_from_students(teacher: models.Teacher):
         )
         return [row[0] for row in result.fetchall() if row[0]]
 
-async def update_student_field(teacher, student_id, field: str, value: str):
+
+async def update_student_field(teacher, student_id: int, field: str, value: str):
     async with async_session() as session:
         student = await session.get(models.Student, student_id)
         if student and student.teacher_id == teacher.teacher_id:
             setattr(student, field, value)
             await session.commit()
 
-async def delete_student(teacher, student_id):
+async def delete_student(teacher, student_id: int):
     async with async_session() as session:
         student = await session.get(models.Student, student_id)
         if student and student.teacher_id == teacher.teacher_id:
             await session.delete(student)
             await session.commit()
 
+
+
+
+async def delete_teacher(teacher_id: int):
+    """Удаляет преподавателя и всех его учеников из базы."""
+    async with async_session() as session:
+        teacher = await session.get(models.Teacher, teacher_id)
+        if teacher:
+            await session.delete(teacher)
+            await session.commit()
+
+
+
 # ──────── LESSON ────────
 
 from datetime import datetime
+from database.db import async_session
+import database.models as models
 
-async def create_lesson(teacher: models.Teacher, student: models.Student, subject: str, start_time: datetime, end_time: datetime, title: str = ""):
+
+
+async def create_lesson(
+    teacher: models.Teacher,
+    student: models.Student,
+    start_dt: datetime,
+    end_dt: datetime,
+    is_regular: bool = False,
+    regular_interval: str = ""
+) -> models.Lesson:
+    """
+    Создаёт урок:
+    - data_of_lesson  = дата (start_dt.date())
+    - start_time      = время начала (start_dt.time())
+    - end_time        = время конца   (end_dt.time())
+    - is_regular      = флаг регулярности
+    - regular_interval = интервал, например 'weekly'
+    """
     async with async_session() as session:
         lesson = models.Lesson(
             teacher_id=teacher.teacher_id,
             students_id=student.students_id,
-            data_of_lesson=start_time.date(),
-            start_time=start_time.time(),
-            end_time=end_time.time(),
+            data_of_lesson=start_dt.date(),
+            start_time=start_dt.time(),
+            end_time=end_dt.time(),
             passed=False,
-            link_plan="",
-            link_report="",
-            link_test="",
-            link_test_verified="",
-            link_HW="",
-            link_HW_verified=""
+            is_regular=is_regular,
+            regular_interval=regular_interval
         )
         session.add(lesson)
         await session.commit()
@@ -164,31 +196,41 @@ async def create_lesson(teacher: models.Teacher, student: models.Student, subjec
         return lesson
 
 
-async def list_upcoming_lessons(teacher: models.Teacher, from_time: datetime = None):
+async def list_upcoming_lessons(
+    teacher: models.Teacher,
+    from_time: datetime = None
+):
+    """
+    Список уроков с датой >= сегодня, упорядоченных по дате и времени начала.
+    """
     async with async_session() as session:
         if from_time is None:
             from_time = datetime.now()
+        today = from_time.date()
         result = await session.execute(
             select(models.Lesson)
             .where(models.Lesson.teacher_id == teacher.teacher_id)
-            .where(models.Lesson.data_of_lesson >= from_time.strftime("%Y-%m-%d %H:%M"))
-            .order_by(models.Lesson.data_of_lesson)
+            .where(models.Lesson.data_of_lesson >= today)
+            .order_by(models.Lesson.data_of_lesson, models.Lesson.start_time)
         )
         return result.scalars().all()
 
-async def get_lessons_for_notification(until_time: datetime):
+async def get_lessons_for_notification(until_dt: datetime):
+    """
+    Берёт уроки, дата которых <= until_dt.date() и которые ещё не помечены как 'passed'.
+    """
     async with async_session() as session:
+        limit_date = until_dt.date()
         result = await session.execute(
             select(models.Lesson)
-            .where(models.Lesson.data_of_lesson <= until_time.strftime("%Y-%m-%d %H:%M"))
+            .where(models.Lesson.data_of_lesson <= limit_date)
             .where(models.Lesson.passed == False)
         )
         return result.scalars().all()
 
 async def set_lesson_notified(lesson_id: int):
     async with async_session() as session:
-        result = await session.execute(select(models.Lesson).filter_by(lesson_id=lesson_id))
-        lesson = result.scalars().first()
+        lesson = await session.get(models.Lesson, lesson_id)
         if lesson:
             lesson.passed = True
             session.add(lesson)
@@ -216,13 +258,22 @@ async def delete_lesson(lesson_id: int):
             return True
         return False
 
-async def update_lesson_datetime(lesson_id: int, new_start: datetime, new_end: datetime):
+async def update_lesson_datetime(
+    lesson_id: int,
+    new_start: datetime,
+    new_end: datetime
+):
+    """
+    Обновляет дату и время урока.
+    """
     async with async_session() as session:
         lesson = await session.get(models.Lesson, lesson_id)
         if lesson:
-            lesson.data_of_lesson = new_start.strftime("%Y-%m-%d %H:%M")
-            lesson.end_time = new_end.strftime("%Y-%m-%d %H:%M")
+            lesson.data_of_lesson = new_start.date()
+            lesson.start_time      = new_start.time()
+            lesson.end_time        = new_end.time()
             await session.commit()
+            await session.refresh(lesson)
             return lesson
         return None
     
@@ -260,3 +311,36 @@ async def set_student_schedule_template(teacher, student_id, days, start_time, e
         await session.commit()
 
 
+
+async def delete_past_lessons():
+    """
+    Удаляет все уроки с датой строго раньше текущей.
+    """
+    async with async_session() as session:
+        today = datetime.now().date()
+        await session.execute(
+            delete(models.Lesson)
+            .where(models.Lesson.data_of_lesson < today)
+        )
+        await session.commit()
+
+async def increment_generation_count(teacher, student_id: int):
+    """
+    Увеличивает счетчик генераций ученика за текущий месяц.
+    Если наступил новый месяц, счетчик сбрасывается.
+    Возвращает новое значение счетчика генераций.
+    """
+    async with async_session() as session:
+        student = await session.get(models.Student, student_id)
+        if not student or student.teacher_id != teacher.teacher_id:
+            return None
+        current_month = datetime.now().strftime("%Y-%m")
+        # Если месяц изменился – сбросить счетчик
+        if student.generation_month != current_month:
+            student.generation_month = current_month
+            student.monthly_gen_count = 0
+        student.monthly_gen_count = (student.monthly_gen_count or 0) + 1
+        new_count = student.monthly_gen_count
+        session.add(student)
+        await session.commit()
+        return new_count

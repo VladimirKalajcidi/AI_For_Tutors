@@ -25,11 +25,20 @@ class EditLessonFSM(StatesGroup):
 @router.message(F.text == "➕ Добавить занятие")
 async def add_lesson_start(message: Message, state: FSMContext, **data):
     teacher = data.get("teacher")
+    # Проверка подписки
+    now = datetime.now()
+    try:
+        exp = datetime.fromisoformat(teacher.subscription_expires) if teacher.subscription_expires else None
+    except Exception:
+        exp = None
+    if not exp or exp < now:
+        await message.answer("🔒 Подписка не активна. Продлите подписку, чтобы добавлять занятия.")
+        return
     students = await crud.list_students(teacher)
     await state.set_state(AddLessonFSM.choosing_student)
     await state.update_data(teacher_id=teacher.teacher_id)
-    await message.answer("👤 Выберите ученика:", reply_markup=student_list_kb(students))
 
+    
 @router.callback_query(F.data.startswith("choose_student:"))
 async def choose_student(callback: CallbackQuery, state: FSMContext):
     student_id = int(callback.data.split(":")[1])

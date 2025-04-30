@@ -6,15 +6,15 @@ import config
 from handlers import auth, subjects, students, schedule, settings, payment, schedule_edit, google_auth
 from middlewares.auth_middleware import AuthMiddleware
 from services import notification_service
-from handlers import schedule_week  # ДОБАВЬ это
-
+from handlers import schedule_week  # подключаем обработчик недельного расписания
 
 logging.basicConfig(level=logging.INFO)
 
 async def main():
     bot = Bot(token=config.BOT_TOKEN, parse_mode="HTML")
     dp = Dispatcher()
-    # Include routers
+
+    # Роутеры (handlers)
     dp.include_router(auth.router)
     dp.include_router(subjects.router)
     dp.include_router(students.router)
@@ -23,28 +23,27 @@ async def main():
     dp.include_router(payment.router)
     dp.include_router(schedule_edit.router)
     dp.include_router(google_auth.router)
-    dp.include_router(schedule_week.router)  # ДОБАВЬ это
+    dp.include_router(schedule_week.router)
 
-
-    # Middlewares
+    # Мидлварь
     dp.message.middleware(AuthMiddleware())
     dp.callback_query.middleware(AuthMiddleware())
-    # Set bot commands (for menu hints)
+
+    # Устанавливаем команды бота (всплывающее меню)
     await bot.set_my_commands([
-        BotCommand(command="start", description="Start the bot"),
-        BotCommand(command="help", description="Show help"),
-        BotCommand(command="add_subject", description="Add a subject"),
-        BotCommand(command="add_student", description="Add a student"),
-        BotCommand(command="add_lesson", description="Add a lesson"),
-        BotCommand(command="login", description="Log in"),
-        BotCommand(command="logout", description="Log out"),
+        BotCommand(command="start", description="Запустить бота"),
+        BotCommand(command="help", description="Помощь"),
+        BotCommand(command="add_student", description="Добавить ученика"),
+        BotCommand(command="add_lesson", description="Добавить урок"),
+        BotCommand(command="login", description="Войти"),
+        BotCommand(command="logout", description="Выйти"),
     ])
-    # Initialize database tables
+    # Инициализация таблиц БД
     from database import db
     await db.init_db()
-    # Start background notification service
+    # Запуск фоновых уведомлений (напоминания о занятиях)
     asyncio.create_task(notification_service.start_scheduler(bot))
-    # Run bot polling
+    # Запуск поллинга бота
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

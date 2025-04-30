@@ -5,8 +5,6 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.exceptions import TelegramBadRequest
 from keyboards.main_menu import main_menu_kb
 from database.db import async_session
-
-from keyboards.main_menu import get_main_menu
 from keyboards.teachers import (
     teacher_profile_keyboard,
     edit_teacher_field_keyboard,
@@ -14,14 +12,14 @@ from keyboards.teachers import (
 )
 import database.crud as crud
 from states.auth_state import TeacherStates
-from database.db import async_session
-from sqlalchemy import select
-# Сохраняем токен в БД
-from sqlalchemy.orm import selectinload
 from database.models import Teacher
 
 from aiogram import F
 from aiogram.fsm.state import State, StatesGroup
+from sqlalchemy import select
+
+
+router = Router()
 
 router = Router()
 
@@ -29,18 +27,6 @@ router = Router()
 @router.message(Text(text=["⚙️ Настройки"]))
 async def menu_settings(message: Message, **data):
     await message.answer("⚙️ Настройки:", reply_markup=settings_menu_keyboard())
-
-
-# 🌐 Смена языка
-@router.callback_query(Text("set_lang"))
-async def callback_set_lang(callback: CallbackQuery, teacher):
-    await callback.answer()
-    new_lang = "en" if teacher.language == "ru" else "ru"
-    teacher.language = new_lang
-    await crud.update_teacher(teacher)
-    await callback.message.edit_text(f"Language changed to {'English' if new_lang == 'en' else 'Russian'}.")
-    await callback.message.answer("Main menu:", reply_markup=get_main_menu(new_lang))
-
 
 # ✏️ Редактирование профиля — список полей
 @router.callback_query(Text("edit_profile"))
@@ -68,16 +54,13 @@ async def callback_select_field(callback: CallbackQuery, state: FSMContext):
 async def process_edit_field(message: Message, state: FSMContext, teacher):
     state_data = await state.get_data()
     field = state_data.get("edit_field")
-
     if not field:
         return
-
     new_value = message.text.strip()
     await crud.update_teacher_field(teacher, field, new_value)
     await state.clear()
-
     await message.answer(f"✅ Поле *{field}* успешно обновлено!", parse_mode="Markdown")
-
+    # Показываем обновленный профиль
     profile_text = (
         f"👤 {teacher.surname or ''} {teacher.name or ''} {teacher.patronymic or ''}\n"
         f"🗓️ Дата рождения: {teacher.birth_date or '—'}\n"
@@ -87,7 +70,6 @@ async def process_edit_field(message: Message, state: FSMContext, teacher):
         f"💼 Профессия: {teacher.occupation or '—'}\n"
         f"🏢 Место работы: {teacher.workplace or '—'}"
     )
-
     await message.answer(profile_text, reply_markup=teacher_profile_keyboard())
 
 
@@ -149,29 +131,25 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 
-@router.message(F.text == "⚙️ Настройки")
-async def open_settings(message: Message):
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🔗 Подключить Google Calendar", callback_data="google_auth")
-    kb.button(text="↩ Главное меню", callback_data="back_to_menu")
-    await message.answer("Настройки:", reply_markup=kb.as_markup())
 
-@router.callback_query(F.data == "google_auth")
-async def ask_for_google_auth(callback: CallbackQuery, state: FSMContext):
-    from handlers.google_auth import start_google_auth
-    await start_google_auth(callback.message, state)
-
-
-@router.callback_query(F.data == "back_to_menu")
-async def back_to_menu(callback: CallbackQuery):
-    from keyboards.main_menu import main_menu_kb
-    from database import crud
-
-    teacher = await crud.get_teacher_by_telegram_id(callback.from_user.id)
-    lang = teacher.language if teacher else "ru"
-
-    await callback.message.answer(
-        "Главное меню. Выберите раздел:",
-        reply_markup=main_menu_kb(lang)
+# 🗑 Удаление аккаунта
+@router.callback_query(Text("delete_account"))
+async def callback_delete_account(callback: CallbackQuery):
+    """Запрос подтверждения удаления аккаунта."""
+    await callback.answer()
+    confirm_kb = Message.reply_markup = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="✅ Да, удалить", callback_data="confirm_delete_account")],
+        [types.InlineKeyboardButton(text="❌ Отмена", callback_data="back_to_settings")]
+    ])
+    await callback.message.edit_text(
+        "❗️ Вы уверены, что хотите удалить свой аккаунт? Это действие необратимо.",
+        reply_markup=confirm_kb
     )
 
+@router.callback_query(Text("confirm_delete_account"))
+async def callback_confirm_delete_account(callback: CallbackQuery, teacher):
+    """Полное удаление аккаунта преподавателя и связанных данных."""
+    await crud.delete_teacher(teacher.teacher_id)
+    await callback.answer("Ваш аккаунт удалён.", show_alert=True)
+    # Завершаем диалог и информируем пользователя
+    await callback.message.edit_text("Ваш аккаунт был успешно удалён. Спасибо, что воспользовались нашим сервисом!")
