@@ -82,7 +82,10 @@ from database.db import async_session
 
 @router.message(StudentStates.enter_level)
 async def process_level(message: Message, state: FSMContext, **data):
+    import json
     from database.db import async_session
+    from keyboards.main_menu import main_menu_kb
+
     teacher = data.get("teacher")
     level = message.text.strip()
     student_data = await state.get_data()
@@ -104,8 +107,14 @@ async def process_level(message: Message, state: FSMContext, **data):
             direction=student_data.get("direction"),
             phone=student_data.get("phone"),
             parent_phone=student_data.get("parent_phone"),
-            other_inf=other_info  # ⚠️ not other_info
+            other_inf=other_info
         )
+
+    await state.clear()
+    await message.answer(
+        f"✅ Ученик {new_student.name} {new_student.surname} успешно добавлен!",
+        reply_markup=main_menu_kb(teacher.language)
+    )
 
 
     await message.answer(f"✅ Ученик \"{new_student.name} {new_student.surname}\" успешно добавлен.")

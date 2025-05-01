@@ -1,6 +1,6 @@
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-def get_main_menu(language: str = "ru"):
+def get_main_menu(language: str = "ru") -> ReplyKeyboardMarkup:
     buttons = [
         [KeyboardButton(text="👨‍🎓 Ученики")],
         [KeyboardButton(text="📆 Расписание недели")],
@@ -11,8 +11,7 @@ def get_main_menu(language: str = "ru"):
 
 def main_menu_kb(locale: str = "ru") -> ReplyKeyboardMarkup:
     buttons = [
-        [KeyboardButton("👨‍🎓 Ученики"), KeyboardButton("📆 Расписание недели")],
-        [KeyboardButton("➕ Добавить занятие")],
-        [KeyboardButton("⚙️ Настройки"), KeyboardButton("💳 Оплата")]
+        [KeyboardButton(text="👨‍🎓 Ученики"), KeyboardButton(text="📆 Расписание недели")],
+        [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="💳 Оплата")]
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
