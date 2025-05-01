@@ -2,6 +2,7 @@ import os
 import subprocess
 import uuid
 import logging
+import tempfile 
 from io import BytesIO
 from datetime import datetime
 
@@ -82,44 +83,56 @@ def generate_tex_pdf(tex_code: str, file_name: str) -> str:
     return pdf_path
 
 
+# services/storage_service.py
+
+import yadisk
+from yadisk.exceptions import PathExistsError
+
 async def upload_bytes_to_yandex(
-    file_obj: BytesIO,
+    file_obj,  # file-like, уже в позицию 0
     teacher,
     student,
     category: str,
-    filename_base: str = None
-) -> str:
+    filename_base: str
+) -> bool:
     """
-    Загружает файл из BytesIO на Яндекс.Диск в папку:
-      /TutorBot/<Фамилия>_<Имя>/<Категория>/<Категория>_<DD_MM_YYYY>.pdf
+    Загружает байты на Яндекс.Диск в папку /TutorBot/<Фамилия_Имя>/<category>/
+    Автоматически перезаписывает, если уже есть файл с таким именем.
     """
-    token = getattr(teacher, "yandex_token", None)
+    token = teacher.yandex_token
     if not token:
-        raise RuntimeError("Нет токена Яндекс.Диска у преподавателя.")
+        return False
     y = yadisk.YaDisk(token=token)
 
     # Формируем пути
-    root_dir     = "/TutorBot"
+    root = "/TutorBot"
     student_name = f"{student.surname}_{student.name}"
-    student_dir  = f"{root_dir}/{student_name}"
-    category_dir = f"{student_dir}/{category}"
+    folder = f"{root}/{student_name}/{category}"
+    remote_path = f"{folder}/{filename_base}_{datetime.now().strftime('%d_%m_%Y')}.pdf"
 
-    # Создаём папки, если их нет
-    if not y.exists(root_dir):
-        y.mkdir(root_dir)
-    if not y.exists(student_dir):
-        y.mkdir(student_dir)
-    if not y.exists(category_dir):
-        y.mkdir(category_dir)
+    # Создаём папки, если нужно
+    for p in (root, f"{root}/{student_name}", folder):
+        if not y.exists(p):
+            y.mkdir(p)
 
-    # Имя файла: категория + дата
-    date_str      = datetime.now().strftime("%d_%m_%Y")
-    safe_category = category.replace(" ", "_")
-    filename      = f"{safe_category}_{date_str}.pdf"
+    # Сохраняем временный файл
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(file_obj.read())
+        tmp.flush()
+        tmp_path = tmp.name
 
-    remote_path = f"{category_dir}/{filename}"
-    y.upload(file_obj, remote_path)
-    return remote_path
+    # Пытаемся загрузить, при коллизии — перезаписываем
+    try:
+        y.upload(tmp_path, remote_path)
+    except PathExistsError:
+        # Удаляем старый и грузим новый
+        y.remove(remote_path)
+        y.upload(tmp_path, remote_path)
+    finally:
+        os.remove(tmp_path)
+
+    return True
+
 
 
 async def list_student_materials_by_name(name: str) -> list[str]:

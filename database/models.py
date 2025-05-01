@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Date, Time, Text
 from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy import Column, Integer, String, ForeignKey, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import synonym
 
 
 Base = declarative_base()
@@ -28,6 +27,7 @@ class Teacher(Base):
     link_schedule = Column(String)
     is_logged_in = Column(Boolean, default=True)
     yandex_token = Column(String, nullable=True)
+    tokens_limit = Column(Integer, default=0)
 
     # Отношения
     students = relationship("Student", back_populates="teacher", cascade="all, delete-orphan")
@@ -52,10 +52,13 @@ class Student(Base):
     parent_phone = Column(String)
     other_inf = Column(Text)
     report_student = Column(Text)
+    text_report        = synonym("report_student")
     link_schedule = Column(String)
     schedule_days = Column(Text, default="[]")
     teacher = relationship("Teacher", back_populates="students")
     lessons = relationship("Lesson", back_populates="student", cascade="all, delete-orphan")
+    prompt_tokens_total = Column(Integer, default=0)
+    completion_tokens_total = Column(Integer, default=0)
 
     # Учёт генераций GPT
     generation_month = Column(String, default="")   # месяц учета генераций (формат YYYY-MM)
