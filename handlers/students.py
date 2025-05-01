@@ -14,8 +14,105 @@ from database.models import Student
 from aiogram import F, Bot
 from io import BytesIO
 from services import storage_service
+from keyboards.students import subject_keyboard, direction_keyboard
 
 router = Router()
+
+@router.message(F.text == "➕ Добавить ученика")
+@router.message(Command("add_student"))
+async def add_student_start(message: types.Message, state: FSMContext):
+    await message.answer("📚 Выберите предмет ученика:", reply_markup=subject_keyboard())
+    await state.set_state(StudentStates.enter_subject)
+
+@router.message(StudentStates.enter_subject)
+async def process_subject(message: Message, state: FSMContext):
+    await state.update_data(subject=message.text.strip())
+    await message.answer("Теперь выберите направление обучения:", reply_markup=direction_keyboard())
+    await state.set_state(StudentStates.enter_direction)
+
+@router.message(StudentStates.enter_direction)
+async def process_direction(message: Message, state: FSMContext):
+    await state.update_data(direction=message.text.strip())
+    await message.answer("Введите имя ученика:")
+    await state.set_state(StudentStates.enter_name)
+
+@router.message(StudentStates.enter_name)
+async def process_first_name(message: Message, state: FSMContext):
+    await state.update_data(first_name=message.text.strip())
+    await message.answer("Введите фамилию ученика:")
+    await state.set_state(StudentStates.enter_surname)
+
+@router.message(StudentStates.enter_surname)
+async def process_last_name(message: Message, state: FSMContext):
+    await state.update_data(last_name=message.text.strip())
+    await message.answer("Введите класс ученика:")
+    await state.set_state(StudentStates.enter_class)
+
+@router.message(StudentStates.enter_class)
+async def process_grade(message: Message, state: FSMContext):
+    await state.update_data(grade=message.text.strip())
+    await message.answer("Введите телефон ученика:")
+    await state.set_state(StudentStates.enter_phone)
+
+@router.message(StudentStates.enter_phone)
+async def process_phone(message: Message, state: FSMContext):
+    await state.update_data(phone=message.text.strip())
+    await message.answer("Введите телефон родителя ученика:")
+    await state.set_state(StudentStates.enter_parent_phone)
+
+@router.message(StudentStates.enter_parent_phone)
+async def process_parent_phone(message: Message, state: FSMContext):
+    await state.update_data(parent_phone=message.text.strip())
+    await message.answer("Введите дополнительную информацию об ученике (например, особенности) или '-' если нет:")
+    await state.set_state(StudentStates.enter_profile)
+
+@router.message(StudentStates.enter_profile)
+async def process_profile(message: Message, state: FSMContext):
+    await state.update_data(profile=message.text.strip())
+    await message.answer("Введите цель обучения ученика:")
+    await state.set_state(StudentStates.enter_goal)
+
+@router.message(StudentStates.enter_goal)
+async def process_goal(message: Message, state: FSMContext):
+    await state.update_data(goal=message.text.strip())
+    await message.answer("Введите уровень знаний ученика:")
+    await state.set_state(StudentStates.enter_level)
+
+from database.db import async_session
+
+@router.message(StudentStates.enter_level)
+async def process_level(message: Message, state: FSMContext, **data):
+    from database.db import async_session
+    teacher = data.get("teacher")
+    level = message.text.strip()
+    student_data = await state.get_data()
+
+    other_info = json.dumps({
+        "profile": student_data.get("profile"),
+        "goal": student_data.get("goal"),
+        "level": level
+    })
+
+    async with async_session() as session:
+        new_student = await crud.create_student(
+            session=session,
+            teacher_id=teacher.teacher_id,
+            name=student_data.get("first_name"),
+            surname=student_data.get("last_name"),
+            class_=student_data.get("grade"),
+            subject=student_data.get("subject"),
+            direction=student_data.get("direction"),
+            phone=student_data.get("phone"),
+            parent_phone=student_data.get("parent_phone"),
+            other_inf=other_info  # ⚠️ not other_info
+        )
+
+
+    await message.answer(f"✅ Ученик \"{new_student.name} {new_student.surname}\" успешно добавлен.")
+    students = await crud.list_students(teacher)
+    await message.answer("📋 Обновлённый список учеников:", reply_markup=students_list_keyboard(students))
+    await state.clear()
+
 
 @router.message(Text(text=["👨‍🎓 Ученики", "👨‍🎓 Students"]))
 async def menu_students(message: Message, state: FSMContext, **data):
@@ -39,96 +136,13 @@ async def menu_students(message: Message, state: FSMContext, **data):
 
 
 @router.message(Command("add_student"))
-async def cmd_add_student(message: Message, state: FSMContext, **data):
-    await state.set_state(StudentStates.enter_name)
-    await message.answer("📋 Введите имя нового ученика:")
+async def cmd_add_student(message: Message, state: FSMContext):
+    await add_student_start(message, state)
 
 @router.callback_query(Text("add_student"))
-async def callback_add_student(callback: CallbackQuery, state: FSMContext, **data):
+async def callback_add_student(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    await state.set_state(StudentStates.enter_name)
-    await callback.message.edit_text("📋 Введите имя нового ученика:")
-
-@router.message(StudentStates.enter_name)
-async def process_student_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text.strip())
-    await state.set_state(StudentStates.enter_surname)
-    await message.answer("Введите фамилию ученика:")
-
-@router.message(StudentStates.enter_surname)
-async def process_student_surname(message: Message, state: FSMContext):
-    await state.update_data(surname=message.text.strip())
-    await state.set_state(StudentStates.enter_class)
-    await message.answer("Введите класс ученика:")
-
-
-
-@router.message(StudentStates.enter_class)
-async def process_student_class(message: Message, state: FSMContext):
-    await state.update_data(class_=message.text.strip())
-    await state.set_state(StudentStates.enter_subject)
-    await message.answer("Введите предмет ученика:")
-
-@router.message(StudentStates.enter_subject)
-async def process_subject_input(message: Message, state: FSMContext):
-    await state.update_data(subject=message.text.strip())
-    await state.set_state(StudentStates.enter_phone)
-    await message.answer("Введите телефон ученика:")
-
-@router.message(StudentStates.enter_phone)
-async def process_phone(message: Message, state: FSMContext):
-    await state.update_data(phone=message.text.strip())
-    await state.set_state(StudentStates.enter_parent_phone)
-    await message.answer("Введите телефон родителя ученика:")
-
-@router.message(StudentStates.enter_parent_phone)
-async def process_parent_phone(message: Message, state: FSMContext):
-    await state.update_data(parent_phone=message.text.strip())
-    await state.set_state(StudentStates.enter_profile)
-    await message.answer("Введите дополнительную информацию об ученике (например, особенности) или '-' если нет:")
-
-
-@router.message(StudentStates.enter_profile)
-async def process_profile(message: Message, state: FSMContext):
-    profile_text = message.text.strip()
-    await state.update_data(profile=profile_text)
-    await message.answer("🎯 Введите цель обучения ученика:")
-    await state.set_state(StudentStates.enter_goal)
-
-@router.message(StudentStates.enter_goal)
-async def process_goal(message: Message, state: FSMContext):
-    await state.update_data(goal=message.text.strip())
-    await message.answer("📈 Введите уровень знаний ученика:")
-    await state.set_state(StudentStates.enter_level)
-
-
-@router.message(StudentStates.enter_level)
-async def process_level(message: Message, state: FSMContext, **data):
-    import json
-    teacher = data.get("teacher")
-    level = message.text.strip()
-    student_data = await state.get_data()
-    # Формируем JSON для поля other_inf
-    other_inf = {
-        "profile": student_data.get("profile"),
-        "goal": student_data.get("goal"),
-        "level": level,
-    }
-    new_student = await crud.create_student(
-        teacher=teacher,
-        name=student_data.get("name"),
-        surname=student_data.get("surname"),
-        class_=student_data.get("class_"),
-        subject=student_data.get("subject"),
-        phone=student_data.get("phone"),
-        parent_phone=student_data.get("parent_phone"),
-        other_inf=json.dumps(other_inf),
-    )
-    await message.answer(f"✅ Ученик \"{new_student.name} {new_student.surname}\" успешно добавлен.")
-    students = await crud.list_students(teacher)
-    await message.answer("📋 Обновлённый список учеников:", reply_markup=students_list_keyboard(students))
-    await state.clear()
-
+    await add_student_start(callback.message, state)
 
 
 @router.callback_query(Text(startswith="student:"))
@@ -265,12 +279,28 @@ async def process_student_field_edit(message: Message, state: FSMContext, **data
     await message.answer(f"✅ Поле *{field}* обновлено!", parse_mode="Markdown")
 
     student = await crud.get_student(teacher, students_id)
+    other_inf = student.other_inf or "{}"
+    try:
+        info = json.loads(other_inf)
+    except json.JSONDecodeError:
+        info_text = other_inf    # если вдруг не JSON, покажем как есть
+    else:
+        parts = []
+        if info.get("goal"):
+            parts.append(f"🎯 Цель: {info['goal']}")
+        if info.get("level"):
+            parts.append(f"📈 Уровень: {info['level']}")
+        if info.get("profile"):
+            parts.append(f"📝 Профиль: {info['profile']}")
+        info_text = "\n".join(parts) or "—"
+
     await message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Subject: {student.subject or 'N/A'}\n"
-        f"ℹ️ Info: {student.other_inf or 'No additional info.'}",
-        reply_markup=student_actions_keyboard(students_id)
+        f"📚 Предмет: {student.subject or '—'}\n"
+        f"ℹ️ Доп. информация:\n{info_text}",
+        reply_markup=student_actions_keyboard(student.students_id)
     )
+
 
 @router.callback_query(Text(startswith="delete_student:"))
 async def callback_delete_student(callback: CallbackQuery):
@@ -549,10 +579,25 @@ async def callback_generate_report(callback: CallbackQuery, teacher, **data):
         )
 
     # 5) Отправляем карточку ученика с кнопками
+    other_inf = student.other_inf or "{}"
+    try:
+        info = json.loads(other_inf)
+    except json.JSONDecodeError:
+        info_text = other_inf    # если вдруг не JSON, покажем как есть
+    else:
+        parts = []
+        if info.get("goal"):
+            parts.append(f"🎯 Цель: {info['goal']}")
+        if info.get("level"):
+            parts.append(f"📈 Уровень: {info['level']}")
+        if info.get("profile"):
+            parts.append(f"📝 Профиль: {info['profile']}")
+        info_text = "\n".join(parts) or "—"
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация: {student.other_inf or '—'}",
+        f"ℹ️ Доп. информация:\n{info_text}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
 
@@ -633,12 +678,27 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
         )
 
     # 7) Отправляем карточку ученика с кнопками
+    other_inf = student.other_inf or "{}"
+    try:
+        info = json.loads(other_inf)
+    except json.JSONDecodeError:
+        info_text = other_inf    # если вдруг не JSON, покажем как есть
+    else:
+        parts = []
+        if info.get("goal"):
+            parts.append(f"🎯 Цель: {info['goal']}")
+        if info.get("level"):
+            parts.append(f"📈 Уровень: {info['level']}")
+        if info.get("profile"):
+            parts.append(f"📝 Профиль: {info['profile']}")
+        info_text = "\n".join(parts) or "—"
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация: {student.other_inf or '—'}",
+        f"ℹ️ Доп. информация:\n{info_text}",
         reply_markup=student_actions_keyboard(student.students_id)
-    )
+)
 
     # 8) Инкремент генераций и уведомления
     new_count = await crud.increment_generation_count(teacher, student.students_id)
@@ -717,10 +777,25 @@ async def callback_generate_assignment(callback: CallbackQuery, teacher, **data)
         )
 
     # 5) Кнопки ученика
+    other_inf = student.other_inf or "{}"
+    try:
+        info = json.loads(other_inf)
+    except json.JSONDecodeError:
+        info_text = other_inf    # если вдруг не JSON, покажем как есть
+    else:
+        parts = []
+        if info.get("goal"):
+            parts.append(f"🎯 Цель: {info['goal']}")
+        if info.get("level"):
+            parts.append(f"📈 Уровень: {info['level']}")
+        if info.get("profile"):
+            parts.append(f"📝 Профиль: {info['profile']}")
+        info_text = "\n".join(parts) or "—"
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация: {student.other_inf or '—'}",
+        f"ℹ️ Доп. информация:\n{info_text}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
 
@@ -802,13 +877,27 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
         )
 
     # 5) Информационная карточка ученика
+    other_inf = student.other_inf or "{}"
+    try:
+        info = json.loads(other_inf)
+    except json.JSONDecodeError:
+        info_text = other_inf    # если вдруг не JSON, покажем как есть
+    else:
+        parts = []
+        if info.get("goal"):
+            parts.append(f"🎯 Цель: {info['goal']}")
+        if info.get("level"):
+            parts.append(f"📈 Уровень: {info['level']}")
+        if info.get("profile"):
+            parts.append(f"📝 Профиль: {info['profile']}")
+        info_text = "\n".join(parts) or "—"
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация: {student.other_inf or '—'}",
+        f"ℹ️ Доп. информация:\n{info_text}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
-
     # 6) Инкремент счётчика и оповещения
     new_count = await crud.increment_generation_count(teacher, student.students_id)
     if new_count == 41:
@@ -884,10 +973,25 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
         )
 
     # 7) Информационная карточка ученика
+    other_inf = student.other_inf or "{}"
+    try:
+        info = json.loads(other_inf)
+    except json.JSONDecodeError:
+        info_text = other_inf    # если вдруг не JSON, покажем как есть
+    else:
+        parts = []
+        if info.get("goal"):
+            parts.append(f"🎯 Цель: {info['goal']}")
+        if info.get("level"):
+            parts.append(f"📈 Уровень: {info['level']}")
+        if info.get("profile"):
+            parts.append(f"📝 Профиль: {info['profile']}")
+        info_text = "\n".join(parts) or "—"
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация: {student.other_inf or '—'}",
+        f"ℹ️ Доп. информация:\n{info_text}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
 
@@ -967,10 +1071,25 @@ async def callback_generate_materials(callback: CallbackQuery, teacher, **data):
         )
 
     # 7) Информационная карточка ученика
+    other_inf = student.other_inf or "{}"
+    try:
+        info = json.loads(other_inf)
+    except json.JSONDecodeError:
+        info_text = other_inf    # если вдруг не JSON, покажем как есть
+    else:
+        parts = []
+        if info.get("goal"):
+            parts.append(f"🎯 Цель: {info['goal']}")
+        if info.get("level"):
+            parts.append(f"📈 Уровень: {info['level']}")
+        if info.get("profile"):
+            parts.append(f"📝 Профиль: {info['profile']}")
+        info_text = "\n".join(parts) or "—"
+
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
         f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация: {student.other_inf or '—'}",
+        f"ℹ️ Доп. информация:\n{info_text}",
         reply_markup=student_actions_keyboard(student.students_id)
     )
 

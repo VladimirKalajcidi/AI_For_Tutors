@@ -4,6 +4,8 @@ from database.models import Teacher
 from database.db import async_session
 from sqlalchemy import select, delete, desc
 from database.models import Lesson
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 # ──────── TEACHER ────────
 
@@ -54,31 +56,26 @@ async def update_teacher_field(teacher, field: str, value: str):
 
 # ──────── STUDENT ────────
 
-async def create_student(
-    teacher: models.Teacher,
-    name: str,
-    surname: str,
-    class_: str,
-    subject: str,
-    phone: str,
-    parent_phone: str,
-    other_inf: str = ""
-):
-    async with async_session() as session:
-        student = models.Student(
-            name=name,
-            surname=surname,
-            class_=class_,
-            subject=subject,
-            teacher_id=teacher.teacher_id,
-            phone=phone,
-            parent_phone=parent_phone,
-            other_inf=other_inf
-        )
-        session.add(student)
-        await session.commit()
-        await session.refresh(student)
-        return student
+from .models import Student
+
+async def create_student(session: AsyncSession, teacher_id: int, name: str, surname: str,
+                         class_: str, phone: str, parent_phone: str,
+                         subject: str, direction: str, other_inf: str):
+    student = Student(
+        teacher_id=teacher_id,
+        name=name,
+        surname=surname,
+        class_=class_,
+        phone=phone,
+        parent_phone=parent_phone,
+        subject=subject,
+        direction=direction,
+        other_inf=other_inf
+    )
+    session.add(student)
+    await session.commit()
+    await session.refresh(student)
+    return student
 
 
 async def list_students(teacher: models.Teacher):

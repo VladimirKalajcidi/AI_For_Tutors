@@ -1,4 +1,35 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+
+def subject_keyboard() -> ReplyKeyboardMarkup:
+    buttons = [
+        ["Математика", "Физика"],
+        ["Русский язык", "Информатика"],
+        ["Английский язык", "Химия"],
+        ["Биология", "История"],
+        ["Обществознание"]
+    ]
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=btn) for btn in row] for row in buttons],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+
+def direction_keyboard() -> ReplyKeyboardMarkup:
+    buttons = [
+        ["ЕГЭ", "ОГЭ", "Олимпиада"],
+        ["1–4 класс", "5–6 класс"],
+        ["7–8 класс", "9–10 класс"],
+        ["11 класс"]
+    ]
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=btn) for btn in row] for row in buttons],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
 
 def students_list_keyboard(students):
     buttons = []

@@ -1,7 +1,11 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Date, Time, Text
 from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import Column, Integer, String, ForeignKey, Text
+from sqlalchemy.orm import relationship
+
 
 Base = declarative_base()
+
 
 class Teacher(Base):
     __tablename__ = "teachers"
@@ -41,7 +45,8 @@ class Student(Base):
     name = Column(String)
     surname = Column(String)
     class_ = Column("class", String)
-    subject = Column(String)
+    subject = Column(String)        # новый
+    direction = Column(String) 
     teacher_id = Column(Integer, ForeignKey("teachers.teacher_id"))
     phone = Column(String)
     parent_phone = Column(String)

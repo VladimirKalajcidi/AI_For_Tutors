@@ -32,4 +32,4 @@ SUBSCRIPTION_DURATION_DAYS = int(os.getenv("SUBSCRIPTION_DURATION_DAYS", "30"))
 REMINDER_TIME_MINUTES = int(os.getenv("REMINDER_TIME_MINUTES", "60"))
 
 # Telegram ID администратора (для подтверждения оплаты)
-ADMIN_TG_ID = int(os.getenv("ADMIN_TG_ID", "922135759"))
+ADMIN_TG_ID = int(os.getenv("ADMIN_TG_ID", "1313788984"))
