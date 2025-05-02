@@ -24,13 +24,22 @@ def build_prompt_context(student, language="ru"):
     return name, subject, profile
 
 
-async def ask_gpt(prompt: str,
-                  system_prompt: str,
-                  temperature: float = 0.7,
-                  model: str = "gpt-3.5-turbo",
-                  student_id: int | None = None) -> str:
+# services/gpt_service.py
+
+import httpx
+from database import crud
+
+async def ask_gpt(
+    prompt: str,
+    system_prompt: str,
+    temperature: float = 0.7,
+    model: str = "gpt-3.5-turbo",
+    student_id: int | None = None
+) -> str:
     """
-    Отправляет запрос на прокси GPT, сохраняет usage-токены в БД.
+    Отправляет запрос на GPT-прокси, возвращает текст ответа.
+    Если передан student_id и в ответе есть поля usage,
+    добавляет их в базу через crud.add_token_usage.
     """
     payload = {
         "prompt": prompt,
@@ -39,21 +48,30 @@ async def ask_gpt(prompt: str,
         "model": model
     }
     try:
-        async with httpx.AsyncClient(timeout=60) as http_client:
-            resp = await http_client.post(FOREIGN_GPT_ENDPOINT, json=payload)
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(FOREIGN_GPT_ENDPOINT, json=payload)
             resp.raise_for_status()
             data = resp.json()
     except Exception:
+        # если что-то пошло не так с сетью или прокси
         return "⚠️ GPT недоступен. Попробуйте позже."
 
     content = data.get("content", "").strip()
-    usage = data.get("usage", {})
-    if student_id and usage:
-        # Добавьте в crud.py функцию add_token_usage
-        prompt_t = usage.get("prompt_tokens", 0)
-        comp_t   = usage.get("completion_tokens", 0)
-        await crud.add_token_usage(student_id, prompt_t, comp_t)
+    usage   = data.get("usage", {})
+
+    if student_id and isinstance(usage, dict):
+        # Сохраняем использованные токены
+        prompt_tokens     = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        # В crud.add_token_usage: добавляет токены к студенту
+        await crud.add_token_usage(
+            student_id=student_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens
+        )
+
     return content
+
 
 
 async def generate_study_plan(student,
@@ -366,4 +384,46 @@ async def chat_with_gpt(
         temperature=0.7,
         model=model,
         student_id=student.students_id
+    )
+
+
+
+async def check_solution(
+    student,
+    model: str,
+    solution: str,
+    expected: str,
+    language: str = "ru"
+) -> str:
+    """
+    Сравнивает ответ ученика с эталоном и возвращает анализ.
+    """
+    # Собираем контекст
+    name, subject, profile = build_prompt_context(student, language)
+
+    if language == "ru":
+        prompt = (
+            f"Ты — опытный преподаватель по предмету {subject}. "
+            f"Профиль ученика {name}: {profile}.\n\n"
+            f"Ответ ученика:\n{solution}\n\n"
+            f"Правильный ответ или критерии оценки:\n{expected}\n\n"
+            "Проверь решение: укажи, что выполнено правильно, где допущены ошибки, "
+            "и дай рекомендации, как улучшить."
+        )
+        system = "Ты — строгий, но справедливый учитель, подробно разбирай решения."
+    else:
+        prompt = (
+            f"You are an experienced {subject} teacher. "
+            f"Student {name} profile: {profile}.\n\n"
+            f"Student's solution:\n{solution}\n\n"
+            f"Expected answer or grading criteria:\n{expected}\n\n"
+            "Check the solution: indicate what's correct, what's wrong, and provide improvement tips."
+        )
+        system = "You are a helpful teacher assistant, give thorough feedback."
+
+    return await ask_gpt(
+        prompt=prompt,
+        system_prompt=system,
+        temperature=0.5,
+        model=model
     )

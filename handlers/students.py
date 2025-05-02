@@ -249,22 +249,73 @@ async def callback_start_check(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("🖊️ Введите решение ученика для проверки:")
     await state.set_state(StudentStates.awaiting_solution)
 
-@router.message(StudentStates.awaiting_solution)
-async def process_solution_text(message: Message, state: FSMContext, data):
-    await state.update_data(solution_text=message.text)
-    await message.answer("📋 Теперь введите эталонный ответ или критерии:")
-    await state.set_state(StudentStates.awaiting_expected)
+from aiogram.filters import StateFilter
+from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
+from states.student_states import StudentStates
+import database.crud as crud
+from services.gpt_service import check_solution  # ваша функция проверки
+from keyboards.students import students_list_keyboard
 
-@router.message(StudentStates.awaiting_expected)
-async def process_expected_solution(message: Message, state: FSMContext, data):
-    user_data = await state.get_data()
-    solution = user_data["solution_text"]
-    expected = message.text
-    # вызывать сервис проверки из gpt_service, например check_answer(...)
-    from services.gpt_service import check_answer
-    reply = await check_answer(solution, expected)
-    await message.answer(f"📝 Результат проверки:\n{reply}")
+@router.message(StateFilter(StudentStates.awaiting_solution_text))
+async def process_solution_text(
+    message: Message,
+    state: FSMContext,
+    teacher  # <- вот сюда Aiogram подставит teacher из middleware
+):
+    # 1) достаём из state, какой студент в контексте
+    data = await state.get_data()
+    student_id = data.get("student_id")
+    if not student_id:
+        await message.answer("❌ Не удалось найти студента в контексте.")
+        await state.clear()
+        return
+
+    # 2) достаём студента из БД
+    student = await crud.get_student(teacher, student_id)
+    if not student:
+        await message.answer("❌ Ученик не найден или не ваш.")
+        await state.clear()
+        return
+
+    # 3) получаем решение ученика
+    solution_text = message.text
+
+    # 4) сохраняем решение в state и переводим FSM в ожидание эталона
+    await state.update_data(solution_text=solution_text)
+    await state.set_state(StudentStates.awaiting_expected_solution)
+
+    await message.answer("📋 Спасибо! Теперь пришлите эталонный ответ или критерии оценки.")
+
+
+@router.message(StateFilter(StudentStates.awaiting_expected_solution))
+async def process_expected_solution(
+    message: Message,
+    state: FSMContext,
+    teacher
+):
+    data = await state.get_data()
+    student_id      = data.get("student_id")
+    solution_text   = data.get("solution_text")
+    expected_answer = message.text
+
+    student = await crud.get_student(teacher, student_id)
+
+    # 5) Передаём всё в GPT
+    result = await check_solution(
+        student=student,
+        model=teacher.model,
+        solution=solution_text,
+        expected=expected_answer
+    )
+
+    await message.answer(f"🔍 Проверка:\n{result}")
+
+    # 6) сбрасываем state (или возвращаем в главное меню)
     await state.clear()
+    students = await crud.list_students(teacher)
+    await message.answer("👨‍🎓 Ваши ученики:", reply_markup=students_list_keyboard(students))
+
 
 
 @router.callback_query(Text(startswith="upload:"))
