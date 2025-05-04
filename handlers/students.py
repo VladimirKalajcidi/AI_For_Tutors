@@ -1,20 +1,56 @@
-from aiogram import Router, types
-from aiogram.filters import Text, Command
-from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+import os
 import json
+from datetime import datetime
+from io import BytesIO
+
 from sqlalchemy import select
-from aiogram.filters import StateFilter
+
 import database.crud as crud
-from keyboards.students import students_list_keyboard, student_actions_keyboard
-from states.student_states import StudentStates
-from keyboards.students import edit_student_keyboard, yandex_materials_keyboard
 from database.db import async_session
 from database.models import Student
-from aiogram import F, Bot
-from io import BytesIO
-from services import storage_service
-from keyboards.students import subject_keyboard, direction_keyboard
+
+from aiogram import Router, types, F, Bot
+from aiogram.filters import Text, Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
+
+from keyboards.main_menu import main_menu_kb
+from keyboards.students import approve_kb
+from keyboards.students import (
+    students_list_keyboard,
+    student_actions_keyboard,
+    edit_student_keyboard,
+    yandex_materials_keyboard,
+    subject_keyboard,
+    direction_keyboard,
+    confirm_generation_keyboard,
+)
+
+from states.student_states import StudentStates
+
+import services.storage_service as storage_service
+from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
+
+from services.gpt_service import (
+    generate_diagnostic_test,
+    generate_diagnostic_answer_key,
+    check_solution,
+    generate_study_plan,
+    generate_assignment,
+    generate_homework,
+    generate_classwork,
+    generate_learning_materials,
+)
+
+from services.report_service import append_to_text_report
+from reportlab.pdfgen import canvas
+
 
 router = Router()
 
@@ -78,95 +114,153 @@ async def process_goal(message: Message, state: FSMContext):
     await message.answer("Введите уровень знаний ученика:")
     await state.set_state(StudentStates.enter_level)
 
+    
+import os
+import re
+import json
+from io import BytesIO
+
+from aiogram import Router, types
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.context import FSMContext
+
+# ReportLab для fallback-PDF с кириллицей
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
 from database.db import async_session
+import database.crud as crud
+from keyboards.main_menu import main_menu_kb
+from keyboards.students import students_list_keyboard
+from states.student_states import StudentStates
 
+from services.gpt_service import generate_diagnostic_test, generate_diagnostic_answer_key
+from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
+
+
+# ─── Регистрация шрифта один раз ─────────────────────────────
+_pdf_font_registered = False
+def _register_cyrillic_font():
+    global _pdf_font_registered
+    if not _pdf_font_registered:
+        # Убедитесь, что этот путь существует на вашем сервере
+        pdfmetrics.registerFont(TTFont('DejaVuSans', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+        _pdf_font_registered = True
+
+# ─── Утилита: fallback-PDF с поддержкой кириллицы ──────────────
+def create_plain_text_pdf(text: str, filename: str) -> str:
+    _register_cyrillic_font()
+    output_dir = os.path.join("storage", "pdfs", "fallback")
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"{filename}.pdf")
+    c = canvas.Canvas(path, pagesize=(595, 842))  # A4
+    c.setFont('DejaVuSans', 12)
+    y = 820
+    for line in text.splitlines():
+        c.drawString(40, y, line)
+        y -= 16
+        if y < 40:
+            c.showPage()
+            c.setFont('DejaVuSans', 12)
+            y = 820
+    c.save()
+    return path
+
+# ─── Основная функция ─────────────────────────────────────────
 @router.message(StudentStates.enter_level)
-async def process_level(message: Message, state: FSMContext, **data):
-    import json
-    from database.db import async_session
-    from keyboards.main_menu import main_menu_kb
-    from services.gpt_service import generate_diagnostic_test
-    from services.storage_service import generate_tex_pdf
-    from aiogram.types import FSInputFile
-    import database.crud as crud
-    from database.models import Student
-    from keyboards.students import students_list_keyboard
-
-    teacher = data.get("teacher")
-    level = message.text.strip()
-    student_data = await state.get_data()
-
-    # Собираем other_inf и создаём нового студента
+async def process_level(message: Message, state: FSMContext, teacher):
+    # 1) Создаём ученика
+    data = await state.get_data()
     other_info = json.dumps({
-        "profile": student_data.get("profile"),
-        "goal": student_data.get("goal"),
-        "level": level
+        "profile": data.get("profile"),
+        "goal":    data.get("goal"),
+        "level":   message.text.strip()
     })
-
     async with async_session() as session:
         new_student = await crud.create_student(
             session=session,
             teacher_id=teacher.teacher_id,
-            name=student_data.get("first_name"),
-            surname=student_data.get("last_name"),
-            class_=student_data.get("grade"),
-            subject=student_data.get("subject"),
-            direction=student_data.get("direction"),
-            phone=student_data.get("phone"),
-            parent_phone=student_data.get("parent_phone"),
+            name=data.get("first_name"),
+            surname=data.get("last_name"),
+            class_=data.get("grade"),
+            subject=data.get("subject"),
+            direction=data.get("direction"),
+            phone=data.get("phone"),
+            parent_phone=data.get("parent_phone"),
             other_inf=other_info
         )
-
     await state.clear()
-    # Оповещаем и показываем главное меню
+
+    # 2) Предварительное сообщение
     await message.answer(
-        f"✅ Ученик {new_student.name} {new_student.surname} успешно добавлен!\n"
-        "Сейчас будет сгенерирован стартовый диагностический тест, пожалуйста, подождите…",
+        f"✅ Ученик {new_student.name} {new_student.surname} добавлен!\n"
+        "Генерируем диагностический тест и ключ ответов, подождите…",
         reply_markup=main_menu_kb(teacher.language)
     )
 
-    # 1) Генерация TeX-кода диагностического теста
+    # 3) Получаем TeX от GPT
     diag_tex = await generate_diagnostic_test(
-        new_student,
-        model=teacher.model,
-        language=teacher.language or "ru"
+        new_student, model=teacher.model, language=teacher.language or "ru"
+    )
+    key_tex = await generate_diagnostic_answer_key(
+        new_student, test_tex=diag_tex, model=teacher.model, language=teacher.language or "ru"
     )
 
-    # 2) Компиляция TeX → PDF
-    #    здесь используем ваш storage_service.generate_tex_pdf
-    file_name = f"DiagTest_{new_student.name}_{new_student.surname}"
-    from services.storage_service import generate_tex_pdf
+    base = f"Diagnostic_{new_student.surname}_{new_student.name}"
 
-    # …
-    diag_pdf = generate_tex_pdf(diag_tex, f"Diagnostic_{new_student.name}_{new_student.surname}")
-    await message.answer_document(
-        document=types.FSInputFile(diag_pdf),
-        caption="📊 Диагностический тест"
-    )
+    # 4) Компилируем TeX → PDF, или fallback
+    try:
+        diag_pdf = generate_tex_pdf(diag_tex, f"{base}_test")
+    except RuntimeError:
+        diag_pdf = create_plain_text_pdf(diag_tex, f"{base}_test_fallback")
 
+    try:
+        key_pdf = generate_tex_pdf(key_tex, f"{base}_key")
+    except RuntimeError:
+        key_pdf = create_plain_text_pdf(key_tex, f"{base}_key_fallback")
 
-    # 4) (опционально) загрузка на Яндекс.Диск
+    # 5) Отправляем PDF
+    await message.answer_document(FSInputFile(diag_pdf), caption="📊 Диагностический тест")
+    await message.answer_document(FSInputFile(key_pdf),  caption="🔑 Ключ ответов к тесту")
+
+    # 6) Загружаем на Яндекс.Диск (если нужно)
     if teacher.yandex_token:
-        from io import BytesIO
-        buf = BytesIO(open(diag_pdf, "rb").read())
-        buf.seek(0)
-        await storage_service.upload_bytes_to_yandex(
-            file_obj=buf,
-            teacher=teacher,
-            student=new_student,
-            category="Диагностика",
-            filename_base="Diagnostic"
-        )
+        for category, path in [("Диагностика", diag_pdf), ("Диагностика_Ответы", key_pdf)]:
+            buf = BytesIO(open(path, "rb").read())
+            buf.seek(0)
+            await upload_bytes_to_yandex(
+                file_obj=buf,
+                teacher=teacher,
+                student=new_student,
+                category=category,
+                filename_base=os.path.splitext(os.path.basename(path))[0]
+            )
 
-    # 5) Добавляем TeX-код теста в текстовый отчёт ученика
-    await crud.append_to_report(new_student.students_id, "Диагностический тест", diag_tex)
-
-    # 6) Показываем обновлённый список учеников
+    # 7) Сохраняем TeX в отчёт и показываем список учеников
+    await crud.append_to_report(
+        new_student.students_id,
+        section="Диагностический тест",
+        content=diag_tex
+    )
     students = await crud.list_students(teacher)
     await message.answer(
         "📋 Обновлённый список учеников:",
         reply_markup=students_list_keyboard(students)
     )
+
+    # 8) Предлагаем загрузить решения
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="📝 Загрузить решение диагностического теста",
+            callback_data=f"diagnostic_check:{new_student.students_id}"
+        )
+    ]])
+    await message.answer(
+        "Когда ученик выполнит тест, загрузите его решения для автоматической проверки:",
+        reply_markup=kb
+    )
+
 
 
 
@@ -229,8 +323,10 @@ async def callback_view_student(callback: CallbackQuery, teacher, **data):
 
     await callback.message.edit_text(
         text,
-        reply_markup=student_actions_keyboard(student.students_id)
+        reply_markup=student_actions_keyboard(student.students_id),
+        parse_mode=None  # <== отключает HTML/Markdown
     )
+
 
 
 @router.callback_query(Text(startswith="back_students"))
@@ -248,14 +344,6 @@ async def callback_start_check(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.answer("🖊️ Введите решение ученика для проверки:")
     await state.set_state(StudentStates.awaiting_solution)
-
-from aiogram.filters import StateFilter
-from aiogram.types import Message
-from aiogram.fsm.context import FSMContext
-from states.student_states import StudentStates
-import database.crud as crud
-from services.gpt_service import check_solution  # ваша функция проверки
-from keyboards.students import students_list_keyboard
 
 @router.message(StateFilter(StudentStates.awaiting_solution_text))
 async def process_solution_text(
@@ -541,7 +629,7 @@ async def handle_file_upload(message: Message, state: FSMContext, teacher):
         await message.answer("❌ Ошибка загрузки файла.")
 
 
-...
+
 
 @router.callback_query(Text(startswith="edit_days:"))
 async def callback_edit_days(callback: CallbackQuery, state: FSMContext):
@@ -771,16 +859,7 @@ async def process_report_feedback(message: Message, state: FSMContext, teacher):
 
     
 
-from datetime import datetime
-from io import BytesIO
-from aiogram import types
-from aiogram.types import CallbackQuery
-from aiogram.filters import Text
-from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
-from services.gpt_service import generate_study_plan
-from services.report_service import append_to_text_report
-from database import crud
-from keyboards.students import student_actions_keyboard
+
 
 @router.callback_query(Text(startswith="genplan:"))
 async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
@@ -845,7 +924,7 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
     import services.report_service as report_service
     
 
-    await report_service.append_to_text_report(
+    await append_to_text_report(
         teacher_id=teacher.teacher_id,
         student_id=student.students_id,
         section="План",
@@ -886,17 +965,6 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
         )
 
 
-from datetime import datetime
-from io import BytesIO
-from aiogram import types
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Text
-from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
-from services.gpt_service import generate_assignment
-from services.report_service import append_to_text_report
-from database import crud
-from keyboards.students import student_actions_keyboard
-import services.report_service as report_service
 
 @router.callback_query(Text(startswith="genassign:"))
 async def callback_generate_assignment(callback: CallbackQuery, teacher, **data):
@@ -955,7 +1023,7 @@ async def callback_generate_assignment(callback: CallbackQuery, teacher, **data)
         )
 
     # 7) Добавляем запись в текстовый отчёт
-    await report_service.append_to_text_report(
+    await append_to_text_report(
         teacher_id=teacher.teacher_id,
         student_id=student.students_id,
         section="Классная работа",
@@ -1004,16 +1072,6 @@ async def callback_generate_assignment(callback: CallbackQuery, teacher, **data)
         )
 
 
-from datetime import datetime
-from io import BytesIO
-from aiogram import types
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Text
-from services.gpt_service import generate_homework, generate_classwork
-from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
-from services.report_service import append_to_text_report
-from database import crud
-from keyboards.students import student_actions_keyboard
 
 @router.callback_query(Text(startswith="genhomework:"))
 async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
@@ -1075,7 +1133,7 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
     # handlers/students.py, внутри callback_generate_plan
 
     # handlers/students.py, внутри callback_generate_plan
-    await report_service.append_to_text_report(
+    await append_to_text_report(
         teacher_id=teacher.teacher_id,
         student_id=student.students_id,
         section="Домашняя работа",
@@ -1182,7 +1240,7 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
 
     # 5) Добавляем запись в текстовый отчёт
     # handlers/students.py, внутри callback_generate_plan
-    await report_service.append_to_text_report(
+    await append_to_text_report(
         teacher_id=teacher.teacher_id,
         student_id=student.students_id,
         section="Контрольная работа",
@@ -1230,16 +1288,8 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
             f"⚠️ Для ученика *{student.name}* достигнут лимит генераций на месяц.",
             parse_mode="Markdown"
         )
-from datetime import datetime
-from io import BytesIO
-from aiogram import types
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Text
-from services.gpt_service import generate_learning_materials
-from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
-from services.report_service import append_to_text_report
-from database import crud
-from keyboards.students import student_actions_keyboard
+
+
 
 @router.callback_query(Text(startswith="genmaterials:"))
 async def callback_generate_materials(callback: CallbackQuery, teacher, **data):
@@ -1298,7 +1348,7 @@ async def callback_generate_materials(callback: CallbackQuery, teacher, **data):
         )
 
     # 7) Добавляем запись в текстовый отчёт
-    await report_service.append_to_text_report(
+    await append_to_text_report(
         teacher_id=teacher.teacher_id,
         student_id=student.students_id,
         section="Обучающие материалы",
@@ -1525,16 +1575,6 @@ async def on_confirm_no(callback: CallbackQuery, state: FSMContext, **data):
     )
 
 
-from aiogram import F
-from aiogram.filters import StateFilter
-from aiogram.types import Message
-from services.gpt_service import generate_homework  # или другая ваша функция
-import database.crud as crud
-from aiogram.filters import StateFilter, Text
-from states.student_states import StudentStates
-from keyboards.students import confirm_generation_keyboard
-
-
 @router.message(StateFilter(StudentStates.await_generation_feedback))
 async def process_generation_feedback(
     message: Message,
@@ -1592,3 +1632,51 @@ async def process_generation_feedback(
     # 6) Сбрасываем состояние, но оставляем student_id для возможного повторного захода
     await state.clear()
 
+
+@router.callback_query(Text(startswith="diagnostic_check:"))
+async def on_diagnostic_check(callback: CallbackQuery, state: FSMContext, **data):
+    student_id = int(callback.data.split(":")[1])
+    await callback.answer()
+    await callback.message.answer("📎 Пришлите, пожалуйста, документ с решением ученика.")
+    await state.update_data(diagnostic_student=student_id)
+    await state.set_state(StudentStates.awaiting_diagnostic_solution)
+
+
+@router.message(StudentStates.awaiting_diagnostic_solution)
+async def handle_diagnostic_solution(message: Message, state: FSMContext, **data):
+    if not message.document:
+        return await message.answer("⚠️ Пожалуйста, пришлите документ с решением.")
+
+    student_id = (await state.get_data())["diagnostic_student"]
+    teacher    = data["teacher"]
+
+    # 1) Скачиваем файл и читаем как текст
+    file = await message.bot.get_file(message.document.file_id)
+    b   = BytesIO()
+    await message.bot.download_file(file.file_path, b)
+    text_solution = b.getvalue().decode('utf-8', errors='ignore')
+
+    # 2) Берём ответ-ключ (текст), который мы сгенерировали ранее:
+    #    его можно хранить в базе или в локальном кэше. 
+    #    Для простоты: вызываем ту же функцию ключей.
+    from services.gpt_service import generate_diagnostic_answer_key, check_solution
+    key_text = await generate_diagnostic_answer_key(
+        student=await crud.get_student_by_id_and_teacher(student_id, teacher.teacher_id),
+        model=teacher.model,
+        language=teacher.language
+    )
+
+    # 3) Проверяем решение через GPT
+    analysis = await check_solution(
+        student=await crud.get_student_by_id_and_teacher(student_id, teacher.teacher_id),
+        model=teacher.model,
+        solution=text_solution,
+        expected=key_text,
+        language=teacher.language
+    )
+
+    # 4) Добавляем в отчёт
+    await crud.append_to_report(student_id, "Проверка диагностического теста", analysis)
+
+    await message.answer("✅ Результаты проверки добавлены в отчёт.")
+    await state.clear()

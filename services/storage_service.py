@@ -17,6 +17,37 @@ PDF_TEMP_DIR = os.path.join(BASE_PATH, "storage", "pdfs")
 os.makedirs(PDF_TEMP_DIR, exist_ok=True)
 
 
+# services/storage_service.py
+
+import os
+
+STORAGE_ROOT = "storage"  # путь к папке, где хранятся все файлы учеников
+
+async def get_last_student_file_text(student, category: str) -> str:
+    """
+    Возвращает текст последнего файла ученика по категории (например: 'homework', 'report', 'study_plan').
+    Предполагается, что файлы хранятся в storage/<категория>_<ФИО>.pdf или .txt.
+
+    Если файл не найден — возвращает "(данные отсутствуют)".
+    """
+    import glob
+
+    # формируем шаблон имени файла: например, homework_Иванов*.txt
+    pattern = os.path.join(STORAGE_ROOT, f"{category}_{student.name}*.txt")
+    matches = sorted(glob.glob(pattern), reverse=True)
+
+    if not matches:
+        return "(данные отсутствуют)"
+
+    filepath = matches[0]
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return "(ошибка чтения файла)"
+
+
+
 def generate_text_pdf(text: str, file_name: str) -> str:
     """
     Генерирует PDF из простого текста.

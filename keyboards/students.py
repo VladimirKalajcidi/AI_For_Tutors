@@ -1,5 +1,13 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+
+approve_kb = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="✅ Всё отлично", callback_data="approve_yes")],
+    [InlineKeyboardButton(text="🔁 Хочу переделать", callback_data="approve_retry")]
+])
+
 
 
 def subject_keyboard() -> ReplyKeyboardMarkup:

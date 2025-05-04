@@ -27,6 +27,7 @@ class Teacher(Base):
     link_schedule = Column(String)
     is_logged_in = Column(Boolean, default=True)
     yandex_token = Column(String, nullable=True)
+    lessons_conducted = Column(Integer, default=0)
     tokens_limit = Column(Integer, default=0)
 
     # Отношения
@@ -59,6 +60,7 @@ class Student(Base):
     lessons = relationship("Lesson", back_populates="student", cascade="all, delete-orphan")
     prompt_tokens_total = Column(Integer, default=0)
     completion_tokens_total = Column(Integer, default=0)
+    lessons_completed = Column(Integer, default=0)
 
     # Учёт генераций GPT
     generation_month = Column(String, default="")   # месяц учета генераций (формат YYYY-MM)

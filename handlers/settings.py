@@ -21,8 +21,6 @@ from sqlalchemy import select
 
 router = Router()
 
-router = Router()
-
 # 📌 Открытие меню настроек
 @router.message(Text(text=["⚙️ Настройки"]))
 async def menu_settings(message: Message, **data):

@@ -1,58 +1,51 @@
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, date
 from sqlalchemy import select
 from database.db import async_session
-from database.models import Student, Teacher
+from database.models import Student, Lesson
 from database import crud
 
-WEEKDAYS = {
-    "Mon": 0,
-    "Tue": 1,
-    "Wed": 2,
-    "Thu": 3,
-    "Fri": 4,
-    "Sat": 5,
-    "Sun": 6,
-}
-
-DEFAULT_TIME = "15:00"
-DEFAULT_DURATION = 60
+# дни недели в .strftime("%a") формате
+WEEKDAYS = {"Mon","Tue","Wed","Thu","Fri","Sat","Sun"}
+DEFAULT_TIME     = "15:00"
+DEFAULT_DURATION = 60  # минут
 
 async def generate_weekly_lessons():
     async with async_session() as session:
-        result = await session.execute(select(Student).join(Teacher))
+        # получаем всех студентов вместе с учителем
+        result   = await session.execute(select(Student).join(Student.teacher))
         students = result.scalars().all()
 
-        today = datetime.now().date()
-        upcoming_days = [today + timedelta(days=i) for i in range(7)]
+    today        = date.today()
+    next_week    = [ today + timedelta(days=i) for i in range(7) ]
+    default_h, default_m = map(int, DEFAULT_TIME.split(":"))
 
-        for student in students:
-            if not student.schedule_days:
+    for student in students:
+        if not student.schedule_days:
+            continue
+        try:
+            days = set(json.loads(student.schedule_days))
+        except json.JSONDecodeError:
+            continue
+
+        teacher = student.teacher
+
+        for day in next_week:
+            if day.strftime("%a") not in days:
                 continue
 
-            try:
-                days = json.loads(student.schedule_days)
-            except json.JSONDecodeError:
+            # если уже есть урок на эту дату и для этого студента — пропускаем
+            existing = await crud.list_upcoming_lessons_for_teacher(teacher.teacher_id)
+            if any(
+                les.students_id == student.students_id and
+                les.data_of_lesson == day
+                for les in existing
+            ):
                 continue
 
-            teacher = student.teacher
-
-            for day in upcoming_days:
-                if day.strftime("%a") in days:
-                    start_time = datetime.combine(day, datetime.strptime(DEFAULT_TIME, "%H:%M").time())
-                    end_time = start_time + timedelta(minutes=DEFAULT_DURATION)
-
-                    existing_lessons = await crud.get_lessons_for_teacher(
-                        teacher.teacher_id,
-                        start_time,
-                        end_time
-                    )
-
-                    already_exists = any(
-                        lesson.students_id == student.students_id and lesson.data_of_lesson[:10] == day.isoformat()
-                        for lesson in existing_lessons
-                    )
-
-                    if not already_exists:
-                        await crud.create_lesson(teacher, student, student.subject, start_time, end_time)
-                        print(f"Создан урок для {student.name} в {start_time.strftime('%d.%m')} в {DEFAULT_TIME}")
+            start_dt = datetime.combine(day, time(default_h, default_m))
+            end_dt   = start_dt + timedelta(minutes=DEFAULT_DURATION)
+            # создаём урок
+            await crud.create_lesson(teacher, student, start_dt, end_dt)
+            # (не забудьте также создавать событие в календаре и уведомление)
+            print(f"[AutoSchedule] Урок для {student.name} на {day.isoformat()} в {DEFAULT_TIME}")

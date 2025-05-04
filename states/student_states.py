@@ -37,3 +37,6 @@ class StudentStates(StatesGroup):
     awaiting_solution_text     = State()   # ждем решение ученика
     awaiting_expected_solution = State()   # ждем эталон/критерии
     chatting_with_gpt          = State()   # в режиме диалога
+        # Новый флоу для диагностического теста:
+    awaiting_diagnostic_solution  = State()  # ждём загрузки решения диагностического теста
+    awaiting_diagnostic_expected  = State()  # ждём эталон/ключ ответов

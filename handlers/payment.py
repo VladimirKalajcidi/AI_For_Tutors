@@ -60,22 +60,22 @@ async def send_model_selection(message: types.Message):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="GPT-3.5 Turbo", callback_data="choose_model:gpt-3.5-turbo"
+                    text="Рекомендованная модель. Мощная и самая быстрая", callback_data="choose_model:gpt-3.5-turbo"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="O3-Mini (быстрый)", callback_data="choose_model:o3-mini"
+                    text="Самая сильная нейросеть", callback_data="choose_model:o4-mini"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="GPT-4 (mini)", callback_data="choose_model:gpt-4o-mini"
+                    text="Более слабая модель", callback_data="choose_model:gpt-4o-mini"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="GPT-4 (max)", callback_data="choose_model:gpt-4o"
+                    text="Мощная модель", callback_data="choose_model:gpt-4.1-mini"
                 )
             ],
         ]
@@ -120,22 +120,22 @@ async def callback_choose_students(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="2000 токенов", callback_data="choose_tokens:2000"
+                    text="сжатый формат изложения", callback_data="choose_tokens:1000"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="5000 токенов", callback_data="choose_tokens:5000"
+                    text="средений формат", callback_data="choose_tokens:2000"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="10000 токенов", callback_data="choose_tokens:10000"
+                    text="оптимальный формат", callback_data="choose_tokens:5000"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="15000 токенов", callback_data="choose_tokens:15000"
+                    text="лучшая геренация", callback_data="choose_tokens:10000"
                 )
             ],
         ]
@@ -160,28 +160,32 @@ async def callback_choose_tokens(
 
     # Фиксированные коэффициенты
     cost_factor = {
-        "gpt-3.5-turbo": 1.0,
-        "o3-mini": 0.5,
-        "gpt-4o-mini": 30.0,
-        "gpt-4o": 60.0,
+        "gpt-3.5-turbo": 1, 
+        "o4-mini": 3,
+        "gpt-4o-mini": 0.4,
+        "gpt-4.1-mini": 1.1,
     }
-    base_rate_per_1000 = 0.16
+    base_rate_per_1000 = 0.13
 
     # 1) Новая стоимость
+
+
     factor_new = cost_factor.get(model, 1.0)
-    monthly_tokens_new = 24 * tokens_per_student * students
+
+
+    monthly_tokens_new = 50 * tokens_per_student * students
     est_cost_new = (monthly_tokens_new / 1000) * base_rate_per_1000 * factor_new
-    price_new = int(est_cost_new * 20)
+    price_new = int(est_cost_new * 3)
 
     # 2) Старая стоимость (если был активный тариф)
     old_price = 0
     if teacher.model and teacher.students_count and teacher.tokens_limit:
         factor_old = cost_factor.get(teacher.model, 1.0)
-        monthly_tokens_old = 24 * teacher.tokens_limit * teacher.students_count
+        monthly_tokens_old = 50 * teacher.tokens_limit * teacher.students_count
         est_cost_old = (
             monthly_tokens_old / 1000
         ) * base_rate_per_1000 * factor_old
-        old_price = int(est_cost_old * 20)
+        old_price = int(est_cost_old * 3)
 
     # 3) Сколько дней осталось по старому тарифу
     today = datetime.now().date()

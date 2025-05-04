@@ -223,25 +223,53 @@ async def delete_teacher(teacher_id: int):
             await session.delete(teacher)
             await session.commit()
 
+async def list_upcoming_lessons_for_teacher(teacher_id: int) -> list[Lesson]:
+    from datetime import date
+    from sqlalchemy import select
+    from database.db import async_session
+    from database.models import Lesson
+
+    today = date.today()
+    async with async_session() as session:
+        stmt = (
+            select(Lesson)
+            .where(
+                Lesson.teacher_id == teacher_id,
+                Lesson.passed == False,
+                Lesson.data_of_lesson >= today
+            )
+            .order_by(Lesson.data_of_lesson, Lesson.start_time)
+        )
+        res = await session.execute(stmt)
+        return res.scalars().all()
+
 
 # ──────── Новые функции для токенов и текстового отчёта ────────
 
-async def add_token_usage(student_id: int, prompt_tokens: int, completion_tokens: int):
+# database/crud.py
+
+from database.db import async_session
+from database.models import Student
+
+async def add_token_usage(
+    student_id: int,
+    prompt_tokens: int,
+    completion_tokens: int
+) -> None:
     """
-    Добавляет к глобальным счётчикам токенов ученика.
+    Увеличивает глобальные счётчики токенов ученика.
     """
     async with async_session() as session:
         student = await session.get(Student, student_id)
         if not student:
-            return None
+            # можно залогировать, но просто выходим
+            return
+        # складываем с тем, что уже было
         student.prompt_tokens_total     = (student.prompt_tokens_total     or 0) + prompt_tokens
         student.completion_tokens_total = (student.completion_tokens_total or 0) + completion_tokens
         session.add(student)
         await session.commit()
-        return {
-            "prompt_tokens_total":     student.prompt_tokens_total,
-            "completion_tokens_total": student.completion_tokens_total
-        }
+
 
 async def get_report_text(student_id: int) -> str:
     """
