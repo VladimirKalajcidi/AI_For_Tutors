@@ -106,15 +106,8 @@ def edit_student_keyboard(student_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def confirm_generation_keyboard(student_id: int) -> InlineKeyboardMarkup:
-    """
-    Клавиатура для подтверждения результата генерации:
-    ✅ Всё хорошо — добавляем в отчёт и на Яндекс.Диск
-    ❌ Исправить  — переходим в режим ввода отзывов (await_generation_feedback)
-    """
+def confirm_generation_keyboard(student_id: int, category: str):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Всё хорошо", callback_data=f"confirm_yes:{student_id}"),
-            InlineKeyboardButton(text="❌ Исправить",   callback_data=f"confirm_no:{student_id}")
-        ]
+        [InlineKeyboardButton(text="✅ Всё хорошо", callback_data=f"confirm_yes:{student_id}:{category}")],
+        [InlineKeyboardButton(text="✏️ Нужно исправить", callback_data=f"confirm_no:{student_id}:{category}")],
     ])

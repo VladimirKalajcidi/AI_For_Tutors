@@ -315,17 +315,27 @@ async def callback_view_student(callback: CallbackQuery, teacher, **data):
     # Текст отчёта, который мы накапливаем в student.report_student
     report_text = student.report_student.strip() if student.report_student else "—"
 
+    # Ограничиваем длину текста отчёта
+    MAX_LENGTH = 3000
+    trimmed = False
+    if len(report_text) > MAX_LENGTH:
+        report_text = report_text[:MAX_LENGTH] + "…"
+        trimmed = True
+
     text = (
         f"👤 {student.name} {student.surname or ''}\n"
         f"🎯 Цель: {goal}\n"
         f"📈 Отчёт:\n{report_text}"
     )
+    if trimmed:
+        text += "\n\n⚠️ Полный отчёт обрезан из-за ограничения Telegram."
 
     await callback.message.edit_text(
         text,
         reply_markup=student_actions_keyboard(student.students_id),
-        parse_mode=None  # <== отключает HTML/Markdown
+        parse_mode=None
     )
+
 
 
 
@@ -861,6 +871,7 @@ async def process_report_feedback(message: Message, state: FSMContext, teacher):
 
 
 
+# Генерация учебного плана (study_plan) — добавлена логика подтверждения и сохранения .tex:
 @router.callback_query(Text(startswith="genplan:"))
 async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
     student_id = int(callback.data.split(":")[1])
@@ -868,7 +879,7 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
     if not student:
         return await callback.answer("⚠️ Ученик не найден.", show_alert=True)
 
-    # 1) Проверка подписки
+    # Проверка подписки
     try:
         exp = datetime.fromisoformat(teacher.subscription_expires) if teacher.subscription_expires else None
     except Exception:
@@ -876,15 +887,17 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
     if not exp or exp < datetime.now():
         return await callback.answer("🔒 Подписка не активна.", show_alert=True)
 
-    # 2) Проверка лимита генераций
+    # Проверка лимита генераций
     current_count = student.monthly_gen_count or 0
-    if current_count >= 50:
+    if current_count >= teacher.tokens_limit:
         return await callback.answer("⚠️ Лимит генераций для этого ученика исчерпан.", show_alert=True)
 
     await callback.answer()
+
+    
+
     await callback.message.edit_text("✏️ Генерация учебного плана, пожалуйста ждите...")
 
-    # 3) Генерация TeX-кода учебного плана
     tex_code = await generate_study_plan(
         student,
         model=teacher.model,
@@ -892,37 +905,31 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
         output_format="tex"
     )
 
-    # 4) Компиляция TeX → PDF
+    # Сохранение .tex
+    tex_dir = os.path.join(BASE_DIR, "storage", "tex", "study_plan")
+    os.makedirs(tex_dir, exist_ok=True)
+    filename_base = f"study_plan_{student.name}_{student.surname or ''}"
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    tex_path = os.path.join(tex_dir, f"{filename_base}_{timestamp}.tex")
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(tex_code)
+
     file_name = f"Plan_{student.name}_{student.surname or ''}"
     pdf_path = generate_tex_pdf(tex_code, file_name)
+    await callback.message.answer_document(
+        document=types.FSInputFile(pdf_path),
+        caption=f"📋 Учебный план для {student.name}"
+    )
 
-    # 5) Отправка PDF в чат (или фоллбек на TeX)
-    try:
-        await callback.message.answer_document(
-            document=types.FSInputFile(pdf_path),
-            caption=f"📋 Учебный план для {student.name}"
-        )
-    except Exception:
-        await callback.message.answer("🚨 Не удалось собрать PDF, вот TeX-код:\n" + tex_code)
-
-    # 6) Сохранение на Яндекс.Диске
     if teacher.yandex_token:
         buffer = BytesIO(open(pdf_path, "rb").read())
         buffer.seek(0)
         await upload_bytes_to_yandex(
-            file_obj=buffer,
-            teacher=teacher,
+            file_obj=buffer, teacher=teacher,
             student=student,
             category="План",
             filename_base="Plan"
         )
-
-    # 7) Добавляем запись в текстовый отчёт на Яндекс.Диске
-    #    Блок плана будет записан только один раз в самом верху,
-    #    последующие вызовы просто сохраняют уже существующую версию
-
-    import services.report_service as report_service
-    
 
     await append_to_text_report(
         teacher_id=teacher.teacher_id,
@@ -930,26 +937,18 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
         section="План",
         content=tex_code
     )
-    # 8) Отправляем карточку ученика с кнопками
-    try:
-        extra = json.loads(student.other_inf or "{}")
-        parts = []
-        if extra.get("goal"):
-            parts.append(f"🎯 Цель: {extra['goal']}")
-        if extra.get("level"):
-            parts.append(f"📈 Уровень: {extra['level']}")
-        if extra.get("profile"):
-            parts.append(f"📝 Профиль: {extra['profile']}")
-        info_text = "\n".join(parts) or "—"
-    except Exception:
-        info_text = student.other_inf or "—"
+
+    from keyboards.students import confirm_generation_keyboard
+    kb = confirm_generation_keyboard(student_id, "study_plan")
+    await callback.message.answer("🧐 Вам всё нравится в этом учебном плане?", reply_markup=kb)
 
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация:\n{info_text}",
+        f"📚 Предмет: {student.subject or '—'}\n",
         reply_markup=student_actions_keyboard(student.students_id)
     )
+    # инкремент счётчика...
+
 
     # 9) Инкремент генераций и уведомления
     new_count = await crud.increment_generation_count(teacher, student.students_id)
@@ -967,7 +966,7 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
 
 
 @router.callback_query(Text(startswith="genassign:"))
-async def callback_generate_assignment(callback: CallbackQuery, teacher, **data):
+async def callback_generate_assignment(callback: CallbackQuery, state: FSMContext, teacher, **data):
     student_id = int(callback.data.split(":")[1])
     student = await crud.get_student(teacher, student_id)
     if not student:
@@ -1034,8 +1033,9 @@ async def callback_generate_assignment(callback: CallbackQuery, teacher, **data)
 # 8) Спрашиваем у преподавателя, всё ли его устраивает
     from keyboards.students import confirm_generation_keyboard
 
-    kb = confirm_generation_keyboard(student_id)
+    kb = confirm_generation_keyboard(student_id, category="assignment")
     await callback.message.answer("🧐 Вам всё нравится в этом задании?", reply_markup=kb)
+
 
     # 9) Отправляем карточку ученика с кнопками
     try:
@@ -1073,6 +1073,14 @@ async def callback_generate_assignment(callback: CallbackQuery, teacher, **data)
 
 
 
+# --- handlers/students.py ---
+
+from datetime import datetime
+import os
+# BASE_DIR — корневая папка проекта (один уровень вверх от текущего файла)
+BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+
+# Пример: обработчик генерации домашнего задания с сохранением .tex и корректным confirm:
 @router.callback_query(Text(startswith="genhomework:"))
 async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
     student_id = int(callback.data.split(":")[1])
@@ -1094,9 +1102,11 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
         return await callback.answer("⚠️ Лимит генераций для этого ученика исчерпан.", show_alert=True)
 
     await callback.answer()
+
+
     await callback.message.edit_text("📑 Генерация домашнего задания, пожалуйста ждите...")
 
-    # 1) Генерация TeX-кода домашки
+    # 1) Генерация TeX-кода домашки через GPT
     tex_code = await generate_homework(
         student,
         model=teacher.model,
@@ -1104,35 +1114,35 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
         output_format="tex"
     )
 
-    # 2) Компиляция TeX → PDF
+    # --- Сохранение LaTeX-кода в локальное хранилище для фидбека ---
+    tex_dir = os.path.join(BASE_DIR, "storage", "tex", "homework")
+    os.makedirs(tex_dir, exist_ok=True)  # создавать директорию рекурсивно:contentReference[oaicite:5]{index=5}
+    filename_base = f"homework_{student.name}_{student.surname or ''}"
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    tex_path = os.path.join(tex_dir, f"{filename_base}_{timestamp}.tex")
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(tex_code)
+
+    # 2) Компиляция TeX → PDF и отправка в чат
     file_name = f"Homework_{student.name}_{student.surname or ''}"
     pdf_path = generate_tex_pdf(tex_code, file_name)
+    await callback.message.answer_document(
+        document=types.FSInputFile(pdf_path),  # отправляем PDF-файл как InputFile:contentReference[oaicite:6]{index=6}
+        caption=f"📑 Домашнее задание для {student.name}"
+    )
 
-    # 3) Отправка PDF (или фоллбек на TeX)
-    try:
-        await callback.message.answer_document(
-            document=types.FSInputFile(pdf_path),
-            caption=f"📑 Домашнее задание для {student.name}"
-        )
-    except Exception:
-        await callback.message.answer("🚨 Не удалось собрать PDF, вот TeX-код:\n" + tex_code)
-
-    # 4) Сохранение на Яндекс.Диске
+    # 3) Загрузка на Яндекс.Диск (если есть токен)
     if teacher.yandex_token:
         buffer = BytesIO(open(pdf_path, "rb").read())
         buffer.seek(0)
         await upload_bytes_to_yandex(
-            file_obj=buffer,
-            teacher=teacher,
+            file_obj=buffer, teacher=teacher,
             student=student,
             category="Домашняя_работа",
             filename_base="Homework"
         )
 
-    # 5) Добавляем запись в текстовый отчёт
-    # handlers/students.py, внутри callback_generate_plan
-
-    # handlers/students.py, внутри callback_generate_plan
+    # 4) Добавление в текстовый отчёт на Яндекс.Диске
     await append_to_text_report(
         teacher_id=teacher.teacher_id,
         student_id=student.students_id,
@@ -1140,32 +1150,19 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
         content=tex_code
     )
 
+    # 5) Спрашиваем преподавателя, нужно ли исправить
     from keyboards.students import confirm_generation_keyboard
+    kb = confirm_generation_keyboard(student_id, "homework")
+    await callback.message.answer("🧐 Вам всё нравится в этом домашнем задании?", reply_markup=kb)
 
-    kb = confirm_generation_keyboard(student_id)
-    await callback.message.answer("🧐 Вам всё нравится в этом задании?", reply_markup=kb)
-
-
-    # 7) Отправляем карточку ученика с кнопками
-    try:
-        extra = json.loads(student.other_inf or "{}")
-        parts = []
-        if extra.get("goal"):
-            parts.append(f"🎯 Цель: {extra['goal']}")
-        if extra.get("level"):
-            parts.append(f"📈 Уровень: {extra['level']}")
-        if extra.get("profile"):
-            parts.append(f"📝 Профиль: {extra['profile']}")
-        info_text = "\n".join(parts) or "—"
-    except Exception:
-        info_text = student.other_inf or "—"
-
+    # 6) Отправка карточки ученика и завершение
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация:\n{info_text}",
+        f"📚 Предмет: {student.subject or '—'}\n",
         reply_markup=student_actions_keyboard(student.students_id)
     )
+    # Инкремент счетчика генераций (остальное без изменений)
+
 
     # 8) Инкремент счётчика и оповещения
     new_count = await crud.increment_generation_count(teacher, student.students_id)
@@ -1182,10 +1179,12 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
 
 
 
+# Аналогично для контрольной работы (classwork):
 @router.callback_query(Text(startswith="genclasswork:"))
 async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
     student_id = int(callback.data.split(":")[1])
     student = await crud.get_student(teacher, student_id)
+    
     if not student:
         return await callback.answer("⚠️ Ученик не найден.", show_alert=True)
 
@@ -1203,9 +1202,10 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
         return await callback.answer("⚠️ Лимит генераций для этого ученика исчерпан.", show_alert=True)
 
     await callback.answer()
+
+
     await callback.message.edit_text("🧪 Генерация контрольной работы, пожалуйста ждите...")
 
-    # 1) Генерация TeX-кода контрольной работы
     tex_code = await generate_classwork(
         student,
         model=teacher.model,
@@ -1213,33 +1213,31 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
         output_format="tex"
     )
 
-    # 2) Компиляция TeX → PDF
+    tex_dir = os.path.join(BASE_DIR, "storage", "tex", "classwork")
+    os.makedirs(tex_dir, exist_ok=True)
+    filename_base = f"classwork_{student.name}_{student.surname or ''}"
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    tex_path = os.path.join(tex_dir, f"{filename_base}_{timestamp}.tex")
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(tex_code)
+
     file_name = f"Classwork_{student.name}_{student.surname or ''}"
     pdf_path = generate_tex_pdf(tex_code, file_name)
+    await callback.message.answer_document(
+        document=types.FSInputFile(pdf_path),
+        caption=f"🧪 Контрольная для {student.name}"
+    )
 
-    # 3) Отправка PDF или фоллбек на TeX
-    try:
-        await callback.message.answer_document(
-            document=types.FSInputFile(pdf_path),
-            caption=f"🧪 Контрольная для {student.name}"
-        )
-    except Exception:
-        await callback.message.answer("🚨 Не удалось собрать PDF, вот TeX-код:\n" + tex_code)
-
-    # 4) Сохранение на Яндекс.Диске
     if teacher.yandex_token:
         buffer = BytesIO(open(pdf_path, "rb").read())
         buffer.seek(0)
         await upload_bytes_to_yandex(
-            file_obj=buffer,
-            teacher=teacher,
+            file_obj=buffer, teacher=teacher,
             student=student,
             category="Контрольная_работа",
             filename_base="Classwork"
         )
 
-    # 5) Добавляем запись в текстовый отчёт
-    # handlers/students.py, внутри callback_generate_plan
     await append_to_text_report(
         teacher_id=teacher.teacher_id,
         student_id=student.students_id,
@@ -1247,34 +1245,17 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
         content=tex_code
     )
 
-    # 6) Спрашиваем у преподавателя, всё ли его устраивает
     from keyboards.students import confirm_generation_keyboard
-
-    kb = confirm_generation_keyboard(student_id)
-    await callback.message.answer("🧐 Вам всё нравится в этом задании?", reply_markup=kb)
-
-    await callback.message.answer("🧐 Вам всё нравится в этой контрольной работе?", reply_markup=approve_kb)
-
-    # 7) Отправляем карточку ученика с кнопками
-    try:
-        extra = json.loads(student.other_inf or "{}")
-        parts = []
-        if extra.get("goal"):
-            parts.append(f"🎯 Цель: {extra['goal']}")
-        if extra.get("level"):
-            parts.append(f"📈 Уровень: {extra['level']}")
-        if extra.get("profile"):
-            parts.append(f"📝 Профиль: {extra['profile']}")
-        info_text = "\n".join(parts) or "—"
-    except Exception:
-        info_text = student.other_inf or "—"
+    kb = confirm_generation_keyboard(student_id, "classwork")
+    await callback.message.answer("🧐 Вам всё нравится в этой контрольной работе?", reply_markup=kb)
 
     await callback.message.answer(
         f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация:\n{info_text}",
+        f"📚 Предмет: {student.subject or '—'}\n",
         reply_markup=student_actions_keyboard(student.students_id)
     )
+    # инкремент счётчика...
+
 
     # 8) Инкремент счётчика и оповещения
     new_count = await crud.increment_generation_count(teacher, student.students_id)
@@ -1292,7 +1273,7 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
 
 
 @router.callback_query(Text(startswith="genmaterials:"))
-async def callback_generate_materials(callback: CallbackQuery, teacher, **data):
+async def callback_generate_materials(callback: CallbackQuery, state: FSMContext, teacher, **data):
     student_id = int(callback.data.split(":")[1])
     student = await crud.get_student(teacher, student_id)
     if not student:
@@ -1358,8 +1339,9 @@ async def callback_generate_materials(callback: CallbackQuery, teacher, **data):
     # 8) Спрашиваем у преподавателя, всё ли его устраивает
     from keyboards.students import confirm_generation_keyboard
 
-    kb = confirm_generation_keyboard(student_id)
+    kb = confirm_generation_keyboard(student_id, category="assignment")
     await callback.message.answer("🧐 Вам всё нравится в этом задании?", reply_markup=kb)
+
 
     # 9) Отправляем карточку ученика с кнопками
     try:
@@ -1564,33 +1546,64 @@ async def on_confirm_yes(callback: CallbackQuery, teacher, **data):
     )
 
 @router.callback_query(Text(startswith="confirm_no:"))
-async def on_confirm_no(callback: CallbackQuery, state: FSMContext, **data):
-    student_id = int(callback.data.split(":", 1)[1])
+async def on_confirm_no(callback: CallbackQuery, state: FSMContext):
+    _, student_id_str, category = callback.data.split(":", 2)
+    student_id = int(student_id_str)
+
     await callback.answer()
-    # переводим FSM в режим сбора обратной связи
-    await state.update_data(student_id=student_id)
+    await state.update_data(student_id=student_id, category=category)
     await state.set_state(StudentStates.await_generation_feedback)
-    await callback.message.answer(
-        "✏️ Напишите, что нужно исправить в последней генерации:"
-    )
+    await callback.message.answer("✏️ Напишите, что нужно исправить в последней генерации:")
+
 
 
 @router.message(StateFilter(StudentStates.await_generation_feedback))
 async def process_generation_feedback(
     message: Message,
     state: FSMContext,
-    teacher  # берется из вашего auth middleware
+    teacher  # передаётся через middleware
 ):
-    # получаем из state, к какому студенту относится фидбек
+    from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
+    from services.gpt_service import (
+        generate_homework,
+        generate_assignment,
+        generate_classwork,
+        generate_study_plan,
+        generate_learning_materials,
+    )
+    from keyboards.students import confirm_generation_keyboard
+    from database import crud
+    from io import BytesIO
+    from aiogram.types import FSInputFile
+
+    # 1. Получаем данные из state
     data = await state.get_data()
     student_id = data.get("student_id")
-    feedback   = message.text
+    category = data.get("category", "homework")  # по умолчанию — homework
+    feedback = message.text.strip()
 
-    # подтягиваем студента
+    # 2. Получаем студента
     student = await crud.get_student(teacher, student_id)
+    if not student:
+        await message.answer("❌ Ученик не найден.")
+        return await state.clear()
 
-    # генерируем новую версию с учётом фидбека
-    tex = await generate_homework(
+    # 3. Выбираем нужную функцию генерации
+    generator_map = {
+        "homework": generate_homework,
+        "assignment": generate_assignment,
+        "classwork": generate_classwork,
+        "study_plan": generate_study_plan,
+        "materials": generate_learning_materials,
+    }
+    generator = generator_map.get(category)
+    if not generator:
+        await message.answer("❌ Неизвестный тип генерации.")
+        return await state.clear()
+
+    # 4. Генерация нового документа с учётом фидбека
+    await message.answer("🔄 Генерирую новый документ с учётом ваших правок...")
+    tex = await generator(
         student,
         model=teacher.model,
         language=teacher.language,
@@ -1598,39 +1611,56 @@ async def process_generation_feedback(
         feedback=feedback
     )
 
-    # отправляем результат, сохраняем PDF, заливаем в Я.Диск и в отчёт, как делали раньше
-    from services.storage_service import generate_tex_pdf, upload_bytes_to_yandex
-    from aiogram.types import FSInputFile
-    from io import BytesIO
-
-    # 1) Компиляция в PDF
-    file_name = f"Homework_{student.name}_{student.surname}"
+    # 5. Компиляция в PDF
+    base_name_map = {
+        "homework": "Homework",
+        "assignment": "Assignment",
+        "classwork": "Classwork",
+        "study_plan": "Plan",
+        "materials": "Materials",
+    }
+    base_name = base_name_map.get(category, "Generated")
+    file_name = f"{base_name}_{student.name}_{student.surname or ''}"
     pdf_path = generate_tex_pdf(tex, file_name)
 
-    # 2) Отправка преподавателю
-    await message.answer_document(FSInputFile(pdf_path), caption="📝 Обновлённое домашнее задание")
+    # 6. Отправка PDF преподавателю
+    await message.answer_document(FSInputFile(pdf_path), caption=f"📝 Обновлённое {category.replace('_', ' ')}")
 
-    # 3) Опционально: загрузка в Яндекс.Диск
+    # 7. Загрузка в Яндекс.Диск (если настроено)
     if teacher.yandex_token:
-        buf = BytesIO(open(pdf_path, "rb").read())
-        buf.seek(0)
+        buffer = BytesIO(open(pdf_path, "rb").read())
+        buffer.seek(0)
+        folder_map = {
+            "homework": "Домашняя_работа",
+            "assignment": "Классная_работа",
+            "classwork": "Контрольная_работа",
+            "study_plan": "План",
+            "materials": "Обучающие_материалы",
+        }
+        folder = folder_map.get(category, "Материалы")
         await upload_bytes_to_yandex(
-            file_obj=buf,
+            file_obj=buffer,
             teacher=teacher,
             student=student,
-            category="Домашние работы",
-            filename_base=file_name
+            category=folder,
+            filename_base=base_name
         )
 
-    # 4) Добавляем эту версию в отчёт
-    await crud.append_to_report(student_id, "Домашка (исправлено)", tex)
+    # 8. Добавление в отчёт
+    await crud.append_to_report(
+        student_id=student.students_id,
+        section=f"{category.capitalize()} (исправлено)",
+        content=tex
+    )
 
-    # 5) Снова спрашиваем, всё ли ок? или просто сбрасываем FSM
-    await message.answer("✅ Готово! Если нужно ещё что-то поправить, нажмите кнопку повторно.", 
-                         reply_markup=confirm_generation_keyboard(student_id))
+    # 9. Спрашиваем подтверждение снова
+    kb = confirm_generation_keyboard(student.students_id, category)
+    await message.answer("✅ Готово! Всё устраивает или внести ещё правки?", reply_markup=kb)
 
-    # 6) Сбрасываем состояние, но оставляем student_id для возможного повторного захода
+    # 10. Очищаем state
     await state.clear()
+
+
 
 
 @router.callback_query(Text(startswith="diagnostic_check:"))

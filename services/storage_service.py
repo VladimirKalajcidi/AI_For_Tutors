@@ -19,39 +19,43 @@ os.makedirs(PDF_TEMP_DIR, exist_ok=True)
 
 # services/storage_service.py
 
-import os
+BASE_PATH = os.path.dirname(os.path.dirname(__file__))
+STORAGE_ROOT = os.path.join(BASE_PATH, "storage")
 
-STORAGE_ROOT = "storage"  # путь к папке, где хранятся все файлы учеников
 
 async def get_last_student_file_text(student, category: str) -> str:
+    base_path = os.path.join(STORAGE_ROOT, "tex", category)
+
+    # 🛠 Создаём папку, если её нет
+    os.makedirs(base_path, exist_ok=True)
+
+    student_prefix = f"{student.name}_{student.surname}".strip()
+
+    candidates = [
+        f for f in os.listdir(base_path)
+        if f.endswith(".tex") and student_prefix in f
+    ]
+    if not candidates:
+        return "(предыдущая версия не найдена)"
+
+    candidates.sort(reverse=True)
+    latest_file = os.path.join(base_path, candidates[0])
+    return open(latest_file, encoding="utf-8").read()
+
+
+def generate_text_pdf(text: str, file_name: str, category: str) -> str:
     """
-    Возвращает текст последнего файла ученика по категории (например: 'homework', 'report', 'study_plan').
-    Предполагается, что файлы хранятся в storage/<категория>_<ФИО>.pdf или .txt.
-
-    Если файл не найден — возвращает "(данные отсутствуют)".
+    Генерирует PDF из простого текста и сохраняет исходник.
     """
-    import glob
+    # Сохраняем исходный текст в storage/tex/<category>/
+    tex_folder = os.path.join("storage", "tex", category)
+    os.makedirs(tex_folder, exist_ok=True)
+    
+    tex_path = os.path.join(tex_folder, f"{file_name}.tex")
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(text)
 
-    # формируем шаблон имени файла: например, homework_Иванов*.txt
-    pattern = os.path.join(STORAGE_ROOT, f"{category}_{student.name}*.txt")
-    matches = sorted(glob.glob(pattern), reverse=True)
-
-    if not matches:
-        return "(данные отсутствуют)"
-
-    filepath = matches[0]
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception:
-        return "(ошибка чтения файла)"
-
-
-
-def generate_text_pdf(text: str, file_name: str) -> str:
-    """
-    Генерирует PDF из простого текста.
-    """
+    # Генерация PDF
     pdf_path = os.path.join(PDF_TEMP_DIR, f"{file_name}.pdf")
     c = canvas.Canvas(pdf_path)
     y = 800
@@ -62,7 +66,9 @@ def generate_text_pdf(text: str, file_name: str) -> str:
             c.showPage()
             y = 800
     c.save()
+
     return pdf_path
+
 
 
 def generate_plan_pdf(text: str, student_name: str) -> str:
