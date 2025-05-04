@@ -82,8 +82,6 @@ async def generate_study_plan(
     feedback: str | None = None
 ) -> str:
     name, subject, profile = build_prompt_context(student)
-    materials = await list_student_materials_by_name(name)
-    context = "\n".join(f"- {m}" for m in materials) if materials else "(нет данных)"
 
     if feedback:
         previous = await get_last_student_file_text(student, "study_plan")
@@ -91,32 +89,24 @@ async def generate_study_plan(
             prompt = (
                 f"Ниже предыдущий учебный план по предмету {subject} для ученика {name}:\n\n"
                 f"{previous}\n\n"
-                f"Внеси правки по следующему замечанию:\n{feedback}\n"
+                f"Внеси правки по замечанию:\n{feedback}\n"
                 "Сохрани структуру и стиль документа."
             )
         else:
             prompt = (
-                f"Составь новый учебный план по предмету {subject} для ученика {name}. "
-                f"Профиль: {profile}. Ранее выданные материалы:\n{context}"
+                f"Составь учебный план по предмету {subject} для ученика {name}, "
+                f"уровень: {profile}. Укажи темы, цели, и последовательность изучения."
             )
     else:
         prompt = (
-            f"Составь подробный учебный план по предмету {subject} для ученика {name}. "
-            f"Профиль: {profile}. Ранее выданные материалы:\n{context}\n"
-            "Распредели темы по занятиям и укажи цели каждого этапа."
+            f"Составь подробный учебный план по предмету {subject} для ученика {name}, "
+            f"уровень: {profile}. Укажи темы, цели и порядок занятий."
         )
 
     if output_format == "tex":
-        prompt += "\nОтформатируй ответ как LaTeX документ."
+        prompt += "\nОформи в LaTeX-стиле."
 
-    return await ask_gpt(
-        prompt=prompt,
-        system_prompt="Ты — опытный методист, формируй подробный учебный план по шагам.",
-        temperature=0.7,
-        model=model,
-        student_id=student.students_id
-    )
-
+    return await ask_gpt(prompt, "Ты — преподаватель, составляешь учебные планы.", temperature=0.7, model=model, student_id=student.students_id)
 
 
 # services/gpt_service.py
@@ -195,49 +185,55 @@ import database.crud as crud
 async def generate_homework(
     student,
     model: str,
+    topic: str | None = None,
+    num_questions: int = 5,
     language: str = "ru",
     output_format: str = "text",
     feedback: str | None = None
 ) -> str:
-    """
-    Генерирует домашнее задание или вносит правки в предыдущее.
-    """
-    from services.storage_service import get_last_student_file_text
-
-    name, subject, profile = build_prompt_context(student, language)
-    prompt_parts = []
+    name, subject, profile = build_prompt_context(student)
 
     if feedback:
-        previous = await get_last_student_file_text(student, category="homework")
-        prompt_parts.append(f"Предыдущее домашнее задание:\n{previous}")
-        prompt_parts.append("Внеси правки по замечаниям, сохранив структуру документа:")
-        prompt_parts.append(feedback)
+        previous = await get_last_student_file_text(student, "homework")
+        if previous:
+            print("[DEBUG] Предыдущее задание:\n", previous)
+            prompt = (
+                f"Ниже предыдущее домашнее задание по предмету {subject} для ученика {name}:\n\n"
+                f"{previous}\n\n"
+                f"Внеси правки по замечанию:\n{feedback}\n"
+                "Сохрани структуру и стиль документа."
+            )
+        else:
+            prompt = (
+                f"Составь новое задание по теме «{topic or 'из учебного плана'}» "
+                f"по предмету {subject} для ученика {name}, уровень: {profile}. "
+                f"Включи {num_questions} нестандартных задач."
+            )
     else:
         report_text = await crud.get_report_text(student.students_id)
-        prompt_parts.append(
+        topic = topic or "следующей теме из учебного плана"
+        prompt = (
             f"Текущий отчёт по ученику:\n{report_text}\n\n"
-            f"Составь домашнее задание по предмету {subject} для ученика {name}. "
-            f"Уровень ученика: {profile}. "
-            "Включи 15–25 разнообразных задач для самостоятельной работы."
+            f"Составь задание по теме «{topic}» по предмету {subject} для ученика {name}, "
+            f"уровень: {profile}. Включи {num_questions} нестандартных задач."
         )
 
     if output_format == "tex":
-        prompt_parts.append("Отформатируй результат как LaTeX-документ с окружениями для задач.")
-
-    full_prompt = "\n\n".join(prompt_parts)
+        prompt += "\nСделай форматирование в стиле LaTeX."
 
     return await ask_gpt(
-        prompt=full_prompt,
-        system_prompt="Ты — полезный ассистент, генерируй или правь домашние задания.",
+        prompt=prompt,
+        system_prompt="Ты — ассистент-преподаватель, пиши задания в LaTeX.",
         temperature=0.7,
         model=model,
         student_id=student.students_id
     )
 
-
 async def generate_classwork(
     student,
     model: str,
+    topic: str | None = None,
+    num_questions: int = 5,
     language: str = "ru",
     output_format: str = "text",
     feedback: str | None = None
@@ -248,40 +244,38 @@ async def generate_classwork(
         previous = await get_last_student_file_text(student, "classwork")
         if previous:
             prompt = (
-                f"Ниже предыдущая контрольная работа по предмету {subject} для ученика {name}:\n\n"
+                f"Ниже предыдущее классное задание по предмету {subject} для ученика {name}:\n\n"
                 f"{previous}\n\n"
-                f"Внеси правки согласно замечанию:\n{feedback}\n"
-                "Сохрани структуру документа."
+                f"Внеси правки по замечанию:\n{feedback}\n"
+                "Сохрани структуру и стиль документа."
             )
         else:
             prompt = (
-                f"Составь контрольную работу по предмету {subject} для ученика {name}. "
-                f"Профиль: {profile}. Включи 15–25 заданий."
+                f"Составь новое классное задание по теме «{topic or 'из учебного плана'}» "
+                f"по предмету {subject} для ученика {name}, уровень: {profile}. "
+                f"Включи {num_questions} задач."
             )
     else:
         report_text = await crud.get_report_text(student.students_id)
+        topic = topic or "следующей теме из учебного плана"
         prompt = (
             f"Текущий отчёт по ученику:\n{report_text}\n\n"
-            f"Составь контрольную работу по предмету {subject} для ученика {name}. "
-            f"Профиль: {profile}. Включи 15–25 заданий."
+            f"Составь классную работу по теме «{topic}» по предмету {subject} для ученика {name}, "
+            f"уровень: {profile}. Включи {num_questions} задач."
         )
 
     if output_format == "tex":
-        prompt += "\nОтформатируй как LaTeX-документ."
+        prompt += "\nСделай форматирование в стиле LaTeX."
 
-    return await ask_gpt(
-        prompt=prompt,
-        system_prompt="Ты — эксперт по тестам, создавай контрольные работы.",
-        temperature=0.7,
-        model=model,
-        student_id=student.students_id
-    )
+    return await ask_gpt(prompt, "Ты — ассистент-преподаватель, пиши задания в LaTeX.", temperature=0.7, model=model, student_id=student.students_id)
+
 
 
 
 async def generate_learning_materials(
     student,
     model: str,
+    topic: str,
     language: str = "ru",
     output_format: str = "text",
     feedback: str | None = None
@@ -292,33 +286,27 @@ async def generate_learning_materials(
         previous = await get_last_student_file_text(student, "materials")
         if previous:
             prompt = (
-                f"Ниже предыдущая подборка учебных материалов по предмету {subject} для ученика {name}:\n\n"
+                f"Ниже предыдущие учебные материалы по предмету {subject} для ученика {name}:\n\n"
                 f"{previous}\n\n"
-                f"Внеси правки с учётом следующего замечания:\n{feedback}"
+                f"Внеси правки по замечанию:\n{feedback}\n"
+                "Сохрани структуру и стиль документа."
             )
         else:
             prompt = (
-                f"Подбери подборку учебных материалов по предмету {subject} для ученика {name}, "
-                f"уровень: {profile}. Включи теорию, примеры и ресурсы."
+                f"Создай учебные материалы по теме «{topic}» по предмету {subject} для ученика {name}, "
+                f"уровень: {profile}. Объясни теорию, приведи примеры и задачи."
             )
     else:
-        report_text = await crud.get_report_text(student.students_id)
         prompt = (
-            f"Текущий отчёт по ученику:\n{report_text}\n\n"
-            f"Подбери учебные материалы по предмету {subject} для ученика {name}, "
-            f"уровень: {profile}."
+            f"Создай обучающие материалы по теме «{topic}» по предмету {subject} для ученика {name}, "
+            f"уровень: {profile}. Объясни теорию, приведи примеры и упражнения."
         )
 
     if output_format == "tex":
-        prompt += "\nОформи как LaTeX-документ со списком материалов."
+        prompt += "\nОформи в формате LaTeX."
 
-    return await ask_gpt(
-        prompt=prompt,
-        system_prompt="Ты — методист, подбирай качественные материалы.",
-        temperature=0.7,
-        model=model,
-        student_id=student.students_id
-    )
+    return await ask_gpt(prompt, "Ты — преподаватель, создаёшь обучающие материалы.", temperature=0.7, model=model, student_id=student.students_id)
+
 
 
 

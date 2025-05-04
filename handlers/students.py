@@ -1534,16 +1534,18 @@ from aiogram.filters import Text
 from aiogram.types import CallbackQuery
 
 @router.callback_query(Text(startswith="confirm_yes:"))
-async def on_confirm_yes(callback: CallbackQuery, teacher, **data):
-    student_id = int(callback.data.split(":", 1)[1])
-    await callback.answer("✅ Запись сохранена без изменений.", show_alert=True)
-    # редиректим обратно в меню ученика
-    student = await crud.get_student(teacher, student_id)
-    from keyboards.students import student_actions_keyboard
-    await callback.message.edit_text(
-        f"👤 {student.name} {student.surname}\n📚 {student.subject}",
-        reply_markup=student_actions_keyboard(student_id)
-    )
+async def on_confirm_yes(callback: CallbackQuery, **data):
+    try:
+        _, student_id_str, category = callback.data.split(":")
+        student_id = int(student_id_str)
+    except ValueError:
+        return await callback.answer("⚠️ Ошибка в формате данных.", show_alert=True)
+
+    await callback.answer("✅ Отлично! Задание принято.")
+    await callback.message.edit_reply_markup()  # убираем кнопки
+
+    # Можно добавить запись "Подтверждено преподавателем", если нужно
+
 
 @router.callback_query(Text(startswith="confirm_no:"))
 async def on_confirm_no(callback: CallbackQuery, state: FSMContext):
