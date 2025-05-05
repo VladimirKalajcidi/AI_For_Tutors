@@ -942,11 +942,6 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
     kb = confirm_generation_keyboard(student_id, "study_plan")
     await callback.message.answer("🧐 Вам всё нравится в этом учебном плане?", reply_markup=kb)
 
-    await callback.message.answer(
-        f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n",
-        reply_markup=student_actions_keyboard(student.students_id)
-    )
     # инкремент счётчика...
 
 
@@ -1036,27 +1031,6 @@ async def callback_generate_assignment(callback: CallbackQuery, state: FSMContex
     kb = confirm_generation_keyboard(student_id, category="assignment")
     await callback.message.answer("🧐 Вам всё нравится в этом задании?", reply_markup=kb)
 
-
-    # 9) Отправляем карточку ученика с кнопками
-    try:
-        extra = json.loads(student.other_inf or "{}")
-        parts = []
-        if extra.get("goal"):
-            parts.append(f"🎯 Цель: {extra['goal']}")
-        if extra.get("level"):
-            parts.append(f"📈 Уровень: {extra['level']}")
-        if extra.get("profile"):
-            parts.append(f"📝 Профиль: {extra['profile']}")
-        info_text = "\n".join(parts) or "—"
-    except Exception:
-        info_text = student.other_inf or "—"
-
-    await callback.message.answer(
-        f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация:\n{info_text}",
-        reply_markup=student_actions_keyboard(student.students_id)
-    )
 
     # 10) Инкремент счётчика и предупреждения
     new_count = await crud.increment_generation_count(teacher, student.students_id)
@@ -1156,11 +1130,6 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
     await callback.message.answer("🧐 Вам всё нравится в этом домашнем задании?", reply_markup=kb)
 
     # 6) Отправка карточки ученика и завершение
-    await callback.message.answer(
-        f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n",
-        reply_markup=student_actions_keyboard(student.students_id)
-    )
     # Инкремент счетчика генераций (остальное без изменений)
 
 
@@ -1249,14 +1218,6 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
     kb = confirm_generation_keyboard(student_id, "classwork")
     await callback.message.answer("🧐 Вам всё нравится в этой контрольной работе?", reply_markup=kb)
 
-    await callback.message.answer(
-        f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n",
-        reply_markup=student_actions_keyboard(student.students_id)
-    )
-    # инкремент счётчика...
-
-
     # 8) Инкремент счётчика и оповещения
     new_count = await crud.increment_generation_count(teacher, student.students_id)
     if new_count == teacher.tokens_limit - 9:
@@ -1344,27 +1305,6 @@ async def callback_generate_materials(callback: CallbackQuery, state: FSMContext
     kb = confirm_generation_keyboard(student_id, category="materials")
     await callback.message.answer("🧐 Вам всё нравится в этом задании?", reply_markup=kb)
 
-
-    # 9) Отправляем карточку ученика с кнопками
-    try:
-        extra = json.loads(student.other_inf or "{}")
-        parts = []
-        if extra.get("goal"):
-            parts.append(f"🎯 Цель: {extra['goal']}")
-        if extra.get("level"):
-            parts.append(f"📈 Уровень: {extra['level']}")
-        if extra.get("profile"):
-            parts.append(f"📝 Профиль: {extra['profile']}")
-        info_text = "\n".join(parts) or "—"
-    except Exception:
-        info_text = student.other_inf or "—"
-
-    await callback.message.answer(
-        f"👤 {student.name} {student.surname or ''}\n"
-        f"📚 Предмет: {student.subject or '—'}\n"
-        f"ℹ️ Доп. информация:\n{info_text}",
-        reply_markup=student_actions_keyboard(student.students_id)
-    )
 
     # 10) Инкремент счётчика и оповещения
     new_count = await crud.increment_generation_count(teacher, student.students_id)
@@ -1534,9 +1474,8 @@ async def callback_reports_confirm(
 
 from aiogram.filters import Text
 from aiogram.types import CallbackQuery
-
 @router.callback_query(Text(startswith="confirm_yes:"))
-async def on_confirm_yes(callback: CallbackQuery, **data):
+async def on_confirm_yes(callback: CallbackQuery, teacher, **data):
     try:
         _, student_id_str, category = callback.data.split(":")
         student_id = int(student_id_str)
@@ -1544,7 +1483,34 @@ async def on_confirm_yes(callback: CallbackQuery, **data):
         return await callback.answer("⚠️ Ошибка в формате данных.", show_alert=True)
 
     await callback.answer("✅ Отлично! Задание принято.")
-    await callback.message.edit_reply_markup()  # убираем кнопки
+    await callback.message.edit_reply_markup()
+
+    # Получаем ученика
+    student = await crud.get_student(teacher, student_id)
+    if not student:
+        return await callback.message.answer("❌ Ученик не найден.")
+
+    # Составляем карточку
+    try:
+        extra = json.loads(student.other_inf or "{}")
+        parts = []
+        if extra.get("goal"):
+            parts.append(f"🎯 Цель: {extra['goal']}")
+        if extra.get("level"):
+            parts.append(f"📈 Уровень: {extra['level']}")
+        if extra.get("profile"):
+            parts.append(f"📝 Профиль: {extra['profile']}")
+        info_text = "\n".join(parts) or "—"
+    except Exception:
+        info_text = student.other_inf or "—"
+
+    await callback.message.answer(
+        f"👤 {student.name} {student.surname or ''}\n"
+        f"📚 Предмет: {student.subject or '—'}\n"
+        f"ℹ️ Доп. информация:\n{info_text}",
+        reply_markup=student_actions_keyboard(student.students_id)
+    )
+
 
     # Можно добавить запись "Подтверждено преподавателем", если нужно
 
