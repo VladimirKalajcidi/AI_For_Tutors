@@ -1299,9 +1299,11 @@ async def callback_generate_materials(callback: CallbackQuery, state: FSMContext
     tex_code = await generate_learning_materials(
         student,
         model=teacher.model,
+        topic=None,  # или можно подставить тему из отчёта, если есть
         language=teacher.language or "ru",
         output_format="tex"
     )
+
 
     # 4) Компиляция TeX → PDF
     file_name = f"Materials_{student.name}_{student.surname or ''}"
@@ -1339,7 +1341,7 @@ async def callback_generate_materials(callback: CallbackQuery, state: FSMContext
     # 8) Спрашиваем у преподавателя, всё ли его устраивает
     from keyboards.students import confirm_generation_keyboard
 
-    kb = confirm_generation_keyboard(student_id, category="assignment")
+    kb = confirm_generation_keyboard(student_id, category="materials")
     await callback.message.answer("🧐 Вам всё нравится в этом задании?", reply_markup=kb)
 
 

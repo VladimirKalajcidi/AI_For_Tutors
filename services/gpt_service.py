@@ -275,12 +275,18 @@ async def generate_classwork(
 async def generate_learning_materials(
     student,
     model: str,
-    topic: str,
+    topic: str | None = None, 
     language: str = "ru",
     output_format: str = "text",
     feedback: str | None = None
 ) -> str:
     name, subject, profile = build_prompt_context(student)
+
+    name, subject, profile = build_prompt_context(student)
+
+    if topic is None:
+        report_text = await crud.get_report_text(student.students_id)
+        topic = "следующей теме из учебного плана"
 
     if feedback:
         previous = await get_last_student_file_text(student, "materials")
@@ -297,10 +303,14 @@ async def generate_learning_materials(
                 f"уровень: {profile}. Объясни теорию, приведи примеры и задачи."
             )
     else:
+        report_text = await crud.get_report_text(student.students_id)
+        topic = topic or "следующей теме из учебного плана"
         prompt = (
+            f"Текущий отчёт по ученику:\n{report_text}\n\n"
             f"Создай обучающие материалы по теме «{topic}» по предмету {subject} для ученика {name}, "
             f"уровень: {profile}. Объясни теорию, приведи примеры и упражнения."
         )
+
 
     if output_format == "tex":
         prompt += "\nОформи в формате LaTeX."
