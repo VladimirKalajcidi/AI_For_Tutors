@@ -131,18 +131,18 @@ from aiogram.fsm.context import FSMContext
 
 
 # 🗑 Удаление аккаунта
+from aiogram import types
 @router.callback_query(Text("delete_account"))
 async def callback_delete_account(callback: CallbackQuery):
     """Запрос подтверждения удаления аккаунта."""
     await callback.answer()
-    confirm_kb = Message.reply_markup = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text="✅ Да, удалить", callback_data="confirm_delete_account")],
-        [types.InlineKeyboardButton(text="❌ Отмена", callback_data="back_to_settings")]
+    confirm_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [
+            types.InlineKeyboardButton(text="✅ Подтвердить", callback_data="confirm_delete_account"),
+            types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_delete")
+        ]
     ])
-    await callback.message.edit_text(
-        "❗️ Вы уверены, что хотите удалить свой аккаунт? Это действие необратимо.",
-        reply_markup=confirm_kb
-    )
+    await callback.message.answer("⚠️ Вы уверены, что хотите удалить аккаунт?", reply_markup=confirm_kb)
 
 @router.callback_query(Text("confirm_delete_account"))
 async def callback_confirm_delete_account(callback: CallbackQuery, teacher):

@@ -176,3 +176,7 @@ cython_debug/
 .env
 # Ignore all .env files
 **/.env
+*.db
+**.db
+tutor_bot.db
+test.db

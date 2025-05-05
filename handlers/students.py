@@ -1643,7 +1643,7 @@ async def on_diagnostic_check(callback: CallbackQuery, state: FSMContext, **data
 
 
 @router.message(StudentStates.awaiting_diagnostic_solution)
-async def handle_diagnostic_solution(message: Message, state: FSMContext, **data):
+async def handle_diagnostic_solution(message: Message, bot: Bot, state: FSMContext, **data):
     if not message.document:
         return await message.answer("⚠️ Пожалуйста, пришлите документ с решением.")
 
@@ -1651,20 +1651,30 @@ async def handle_diagnostic_solution(message: Message, state: FSMContext, **data
     teacher    = data["teacher"]
 
     # 1) Скачиваем файл и читаем как текст
-    file = await message.bot.get_file(message.document.file_id)
+    file = await bot.get_file(message.document.file_id)
     b   = BytesIO()
-    await message.bot.download_file(file.file_path, b)
+    await bot.download_file(file.file_path, b)
     text_solution = b.getvalue().decode('utf-8', errors='ignore')
 
     # 2) Берём ответ-ключ (текст), который мы сгенерировали ранее:
     #    его можно хранить в базе или в локальном кэше. 
     #    Для простоты: вызываем ту же функцию ключей.
     from services.gpt_service import generate_diagnostic_answer_key, check_solution
-    key_text = await generate_diagnostic_answer_key(
-        student=await crud.get_student_by_id_and_teacher(student_id, teacher.teacher_id),
+    student_obj = await crud.get_student_by_id_and_teacher(student_id, teacher.teacher_id)
+
+    test_tex = await generate_diagnostic_test(
+        student=student_obj,
         model=teacher.model,
         language=teacher.language
     )
+
+    key_text = await generate_diagnostic_answer_key(
+        student=student_obj,
+        test_tex=test_tex,
+        model=teacher.model,
+        language=teacher.language
+    )
+
 
     # 3) Проверяем решение через GPT
     analysis = await check_solution(
