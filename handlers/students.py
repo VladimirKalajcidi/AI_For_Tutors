@@ -774,7 +774,7 @@ async def callback_generate_report_start(callback: CallbackQuery, teacher, state
     if (student.monthly_gen_count or 0) >= 50:
         return await callback.answer("⚠️ Лимит генераций исчерпан.", show_alert=True)
 
-    await callback.message.edit_text("📑 Генерация отчёта, пожалуйста ждите...")
+    await callback.message.answer("📑 Генерация отчёта, пожалуйста ждите...")
     # сама генерация
     tex = await generate_report(
         student,
@@ -896,7 +896,7 @@ async def callback_generate_plan(callback: CallbackQuery, teacher, **data):
 
     
 
-    await callback.message.edit_text("✏️ Генерация учебного плана, пожалуйста ждите...")
+    await callback.message.answer("✏️ Генерация учебного плана, пожалуйста ждите...")
 
     tex_code = await generate_study_plan(
         student,
@@ -986,7 +986,7 @@ async def callback_generate_assignment(callback: CallbackQuery, state: FSMContex
         return await callback.answer("⚠️ Лимит генераций для этого ученика исчерпан.", show_alert=True)
 
     await callback.answer()
-    await callback.message.edit_text("✏️ Генерация задания, пожалуйста ждите...")
+    await callback.message.answer("✏️ Генерация задания, пожалуйста ждите...")
 
     # 3) Генерация TeX-кода задания
     tex_code = await generate_assignment(
@@ -1104,7 +1104,7 @@ async def callback_generate_homework(callback: CallbackQuery, teacher, **data):
     await callback.answer()
 
 
-    await callback.message.edit_text("📑 Генерация домашнего задания, пожалуйста ждите...")
+    await callback.message.answer("📑 Генерация домашнего задания, пожалуйста ждите...")
 
     # 1) Генерация TeX-кода домашки через GPT
     tex_code = await generate_homework(
@@ -1204,7 +1204,7 @@ async def callback_generate_classwork(callback: CallbackQuery, teacher, **data):
     await callback.answer()
 
 
-    await callback.message.edit_text("🧪 Генерация контрольной работы, пожалуйста ждите...")
+    await callback.message.answer("🧪 Генерация контрольной работы, пожалуйста ждите...")
 
     tex_code = await generate_classwork(
         student,
@@ -1293,7 +1293,7 @@ async def callback_generate_materials(callback: CallbackQuery, state: FSMContext
         return await callback.answer("⚠️ Лимит генераций для этого ученика исчерпан.", show_alert=True)
 
     await callback.answer()
-    await callback.message.edit_text("📚 Подбор обучающих материалов, пожалуйста ждите...")
+    await callback.message.answer("📚 Подбор обучающих материалов, пожалуйста ждите...")
 
     # 3) Генерация TeX-кода материалов
     tex_code = await generate_learning_materials(
