@@ -327,6 +327,18 @@ async def append_to_report(student_id: int, section: str, content: str) -> bool:
         return True
 
 
+async def mark_topic_completed(student_id: int) -> None:
+    """
+    Помечает очередную тему как пройденную (увеличивает lessons_completed).
+    """
+    async with async_session() as session:
+        student = await session.get(Student, student_id)
+        if student:
+            student.lessons_completed = (student.lessons_completed or 0) + 1
+            session.add(student)
+            await session.commit()
+
+
 # ──────── LESSON ────────
 
 from datetime import datetime

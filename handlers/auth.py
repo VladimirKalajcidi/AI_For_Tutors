@@ -164,30 +164,22 @@ async def enter_email(
 
     # 3) Затем — выбор модели GPT
     models_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text="GPT-3.5 Turbo",
-                callback_data="choose_model:gpt-3.5-turbo"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="O3-Mini (быстрый)",
-                callback_data="choose_model:o3-mini"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="gpt-4o-mini",
-                callback_data="choose_model:gpt-4o-mini"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text="gpt-4o",
-                callback_data="choose_model:gpt-4o"
-            )
-        ],
+            [
+                InlineKeyboardButton(
+                    text="Мощная модель", callback_data="choose_model:gpt-4.1-mini"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Самая сильная нейросеть", callback_data="choose_model:o4-mini"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="Более слабая модель", callback_data="choose_model:gpt-4o-mini"
+                )
+            ]
+
     ])
     await message.answer(
         "💳 Выберите модель GPT для вашей подписки:",

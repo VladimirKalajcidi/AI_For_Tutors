@@ -60,7 +60,7 @@ async def send_model_selection(message: types.Message):
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="Рекомендованная модель. Мощная и самая быстрая", callback_data="choose_model:gpt-3.5-turbo"
+                    text="Мощная модель", callback_data="choose_model:gpt-4.1-mini"
                 )
             ],
             [
@@ -72,12 +72,7 @@ async def send_model_selection(message: types.Message):
                 InlineKeyboardButton(
                     text="Более слабая модель", callback_data="choose_model:gpt-4o-mini"
                 )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="Мощная модель", callback_data="choose_model:gpt-4.1-mini"
-                )
-            ],
+            ]
         ]
     )
     await message.answer(
@@ -100,7 +95,6 @@ async def callback_choose_model(
             [InlineKeyboardButton(text="10 учеников", callback_data="choose_students:10")],
             [InlineKeyboardButton(text="15 учеников", callback_data="choose_students:15")],
             [InlineKeyboardButton(text="20 учеников", callback_data="choose_students:20")],
-            [InlineKeyboardButton(text="25+ учеников", callback_data="choose_students:25")],
         ]
     )
     await callback.message.edit_text(
@@ -120,22 +114,22 @@ async def callback_choose_students(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="сжатый формат изложения", callback_data="choose_tokens:1000"
+                    text="сжатый формат изложения", callback_data="choose_tokens:5000"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="средений формат", callback_data="choose_tokens:2000"
+                    text="средений формат", callback_data="choose_tokens:7000"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="оптимальный формат", callback_data="choose_tokens:5000"
+                    text="оптимальный формат", callback_data="choose_tokens:10000"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="лучшая геренация", callback_data="choose_tokens:10000"
+                    text="лучшая геренация", callback_data="choose_tokens:15000"
                 )
             ],
         ]
@@ -160,7 +154,6 @@ async def callback_choose_tokens(
 
     # Фиксированные коэффициенты
     cost_factor = {
-        "gpt-3.5-turbo": 1, 
         "o4-mini": 3,
         "gpt-4o-mini": 0.4,
         "gpt-4.1-mini": 1.1,

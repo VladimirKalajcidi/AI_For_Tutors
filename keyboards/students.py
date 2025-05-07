@@ -66,14 +66,13 @@ def student_actions_keyboard(student_id: int) -> InlineKeyboardMarkup:
     Основное меню по работе с учеником.
     """
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 Яндекс.Диск",       callback_data=f"yadisk:{student_id}")],
+        [InlineKeyboardButton(text="📤 Загрузить файл на Яндекс Диск",       callback_data=f"yadisk:{student_id}")],
         [InlineKeyboardButton(text="📋 План",              callback_data=f"genplan:{student_id}")],
         [InlineKeyboardButton(text="📝 Задание",           callback_data=f"genassign:{student_id}")],
         [InlineKeyboardButton(text="📑 Домашка",           callback_data=f"genhomework:{student_id}")],
         [InlineKeyboardButton(text="🧪 Контрольная",       callback_data=f"genclasswork:{student_id}")],
         [InlineKeyboardButton(text="📑 Отчёты",            callback_data=f"reports:{student_id}")],
         [InlineKeyboardButton(text="📚 Материалы",         callback_data=f"genmaterials:{student_id}")],
-        [InlineKeyboardButton(text="📎 Загрузить файл",    callback_data=f"upload:{student_id}")],
         [InlineKeyboardButton(text="📝 Проверить решение", callback_data=f"check_solution:{student_id}")],
         [InlineKeyboardButton(text="✏️ Редактировать",      callback_data=f"edit_student:{student_id}")],
         [InlineKeyboardButton(text="💬 Чат с GPT",         callback_data=f"chat_gpt:{student_id}")],

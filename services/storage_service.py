@@ -3,11 +3,13 @@ import subprocess
 import uuid
 import logging
 import tempfile 
+import re
 from io import BytesIO
 from datetime import datetime
 
 import yadisk
 from reportlab.pdfgen import canvas
+from yadisk.exceptions import PathExistsError
 
 logger = logging.getLogger(__name__)
 
@@ -16,19 +18,12 @@ BASE_PATH    = os.path.dirname(os.path.dirname(__file__))
 PDF_TEMP_DIR = os.path.join(BASE_PATH, "storage", "pdfs")
 os.makedirs(PDF_TEMP_DIR, exist_ok=True)
 
-
-# services/storage_service.py
-
-BASE_PATH = os.path.dirname(os.path.dirname(__file__))
 STORAGE_ROOT = os.path.join(BASE_PATH, "storage")
 
 
 async def get_last_student_file_text(student, category: str) -> str:
     base_path = os.path.join(STORAGE_ROOT, "tex", category)
-
-    # 🛠 Создаём папку, если её нет
     os.makedirs(base_path, exist_ok=True)
-
     student_prefix = f"{student.name}_{student.surname}".strip()
 
     candidates = [
@@ -44,18 +39,13 @@ async def get_last_student_file_text(student, category: str) -> str:
 
 
 def generate_text_pdf(text: str, file_name: str, category: str) -> str:
-    """
-    Генерирует PDF из простого текста и сохраняет исходник.
-    """
-    # Сохраняем исходный текст в storage/tex/<category>/
     tex_folder = os.path.join("storage", "tex", category)
     os.makedirs(tex_folder, exist_ok=True)
-    
+
     tex_path = os.path.join(tex_folder, f"{file_name}.tex")
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(text)
 
-    # Генерация PDF
     pdf_path = os.path.join(PDF_TEMP_DIR, f"{file_name}.pdf")
     c = canvas.Canvas(pdf_path)
     y = 800
@@ -70,35 +60,41 @@ def generate_text_pdf(text: str, file_name: str, category: str) -> str:
     return pdf_path
 
 
-
 def generate_plan_pdf(text: str, student_name: str) -> str:
-    """
-    Обёртка для generate_text_pdf, сохраняет совместимость.
-    """
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     file_name = f"Plan_{student_name}_{timestamp}"
-    return generate_text_pdf(text, file_name)
+    return generate_text_pdf(text, file_name, "study_plan")
+
+
+def clean_tex_code(tex_code: str) -> str:
+    """
+    Удаляет потенциально конфликтные директивы LaTeX из пользовательского кода.
+    """
+    cleaned = re.sub(r'\\documentclass\{.*?\}', '', tex_code)
+    cleaned = re.sub(r'\\usepackage\{.*?\}', '', cleaned)
+    cleaned = re.sub(r'\\begin\{document\}', '', cleaned)
+    cleaned = re.sub(r'\\end\{document\}', '', cleaned)
+    return cleaned.strip()
 
 
 def generate_tex_pdf(tex_code: str, file_name: str) -> str:
-    """
-    Компилирует LaTeX-код в PDF (через pdflatex),
-    автоматически добавляя минимальную преамбулу.
-    """
     build_id  = uuid.uuid4().hex
     build_dir = os.path.join(PDF_TEMP_DIR, build_id)
     os.makedirs(build_dir, exist_ok=True)
 
     tex_path = os.path.join(build_dir, f"{file_name}.tex")
+
     preamble = r"""\documentclass{article}
 \usepackage[utf8]{inputenc}
 \usepackage[russian]{babel}
 \usepackage{geometry}
+\usepackage{amsmath}
 \geometry{a4paper, margin=25mm}
-\begin{document}
-"""
+\begin{document}"""
+
     ending = r"\end{document}"
-    full_code = f"{preamble}\n{tex_code}\n{ending}"
+    safe_tex = clean_tex_code(tex_code)
+    full_code = f"{preamble}\n{safe_tex}\n{ending}"
 
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(full_code)
@@ -120,49 +116,35 @@ def generate_tex_pdf(tex_code: str, file_name: str) -> str:
     return pdf_path
 
 
-# services/storage_service.py
-
-import yadisk
-from yadisk.exceptions import PathExistsError
-
 async def upload_bytes_to_yandex(
-    file_obj,  # file-like, уже в позицию 0
+    file_obj,
     teacher,
     student,
     category: str,
     filename_base: str
 ) -> bool:
-    """
-    Загружает байты на Яндекс.Диск в папку /TutorBot/<Фамилия_Имя>/<category>/
-    Автоматически перезаписывает, если уже есть файл с таким именем.
-    """
     token = teacher.yandex_token
     if not token:
         return False
     y = yadisk.YaDisk(token=token)
 
-    # Формируем пути
     root = "/TutorBot"
     student_name = f"{student.surname}_{student.name}"
     folder = f"{root}/{student_name}/{category}"
     remote_path = f"{folder}/{filename_base}_{datetime.now().strftime('%d_%m_%Y')}.pdf"
 
-    # Создаём папки, если нужно
     for p in (root, f"{root}/{student_name}", folder):
         if not y.exists(p):
             y.mkdir(p)
 
-    # Сохраняем временный файл
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(file_obj.read())
         tmp.flush()
         tmp_path = tmp.name
 
-    # Пытаемся загрузить, при коллизии — перезаписываем
     try:
         y.upload(tmp_path, remote_path)
     except PathExistsError:
-        # Удаляем старый и грузим новый
         y.remove(remote_path)
         y.upload(tmp_path, remote_path)
     finally:
@@ -171,11 +153,7 @@ async def upload_bytes_to_yandex(
     return True
 
 
-
 async def list_student_materials_by_name(name: str) -> list[str]:
-    """
-    Возвращает список загруженных материалов студента (синхронно).
-    """
     materials_dir = os.path.join(BASE_PATH, "storage", "materials", name)
     if not os.path.isdir(materials_dir):
         return []
